@@ -12,31 +12,12 @@ export class CategoriesService {
     constructor(private readonly prisma: PrismaService) { }
 
     async findAll() {
-        return this.prisma.category.findMany({
-            include: {
-                attributes: {
-                    include: {
-                        attribute: {
-                            select: { id: true, name: true, unit: true },
-                        },
-                    },
-                },
-            },
-        });
+        return this.prisma.category.findMany();
     }
 
     async findOne(id: number) {
         const category = await this.prisma.category.findUnique({
             where: { id },
-            include: {
-                attributes: {
-                    include: {
-                        attribute: {
-                            select: { id: true, name: true, unit: true },
-                        },
-                    },
-                },
-            },
         });
 
         if (!category) {
@@ -86,37 +67,10 @@ export class CategoriesService {
             _max: { price: true },
         });
 
-        // 2. Все значения характеристик активных товаров
-        const attrValues = await this.prisma.productAttributeValue.findMany({
-            where: {
-                product: { categoryId, isActive: true },
-            },
-            include: {
-                attribute: { select: { name: true, unit: true } },
-            },
-        });
-
-        // 3. Группировка: имя атрибута → уникальные значения
-        const grouped = new Map<string, Set<string>>();
-        for (const av of attrValues) {
-            const name = av.attribute.name;
-            if (!grouped.has(name)) {
-                grouped.set(name, new Set());
-            }
-            grouped.get(name)!.add(av.value);
-        }
-
-        const attributes = Array.from(grouped.entries()).map(
-            ([name, valuesSet]) => ({
-                name,
-                values: Array.from(valuesSet),
-            }),
-        );
-
         return {
             minPrice: Number(priceAgg._min.price) || 0,
             maxPrice: Number(priceAgg._max.price) || 0,
-            attributes,
+            attributes: [],
         };
     }
 }

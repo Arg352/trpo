@@ -69,6 +69,7 @@ function renderUserProfile(user, roleNameStr) {
 // Конфигурация вкладок для микроменеджмента
 const ALL_TABS = [
     { id: 'orders_manager', title: 'Все заказы', icon: 'fa-solid fa-list', subtitle: 'Распределение заказов по бригадам', roles: ['senior_manager'] },
+    { id: 'teams_manager', title: 'Управление бригадами', icon: 'fa-solid fa-people-group', subtitle: 'Создание и редактирование бригад', roles: ['senior_manager'] },
     { id: 'employees', title: 'Сотрудники', icon: 'fa-solid fa-user-tie', subtitle: 'Управление персоналом и правами', roles: ['senior_manager'] },
     { id: 'orders_foreman', title: 'Заказы бригады', icon: 'fa-solid fa-clipboard-list', subtitle: 'Назначение заказов сотрудникам', roles: ['foreman'] },
     { id: 'team_members', title: 'Сотрудники бригады', icon: 'fa-solid fa-users', subtitle: 'Список сотрудников вашей бригады', roles: ['foreman'] },
@@ -132,6 +133,9 @@ function renderTabContent(tabId) {
 
     if (tabId === 'orders_manager') {
         renderManagerOrdersTab(contentArea);
+        return;
+    } else if (tabId === 'teams_manager') {
+        renderTeamsManagerTab(contentArea);
         return;
     } else if (tabId === 'employees') {
         renderEmployeesTab(contentArea);
@@ -604,7 +608,7 @@ async function renderWarehouseTab(container) {
 }
 
 // ─── Вкладка "Сотрудники" для старшего менеджера ──────────────────────
-async function renderEmployeesTab(container, searchQuery = '') {
+async function renderEmployeesTab(container) {
     container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка сотрудников...</div>';
 
     updateHeader('Управление сотрудниками', 'Добавление сотрудников и настройка прав доступа',
@@ -612,116 +616,162 @@ async function renderEmployeesTab(container, searchQuery = '') {
 
     const token = localStorage.getItem('adminToken');
     try {
-        const url = searchQuery
-            ? `http://localhost:5000/users/admin/employees?search=${encodeURIComponent(searchQuery)}`
-            : 'http://localhost:5000/users/admin/employees';
-
-        const response = await fetch(url, {
+        const response = await fetch('http://localhost:5000/employees', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Ошибка загрузки сотрудников');
 
-        const employees = await response.json();
+        const allEmployees = await response.json();
 
-        const roleNameMap = { 'foreman': 'Бригадир', 'worker': 'Сотрудник' };
-        const roleBadgeClass = { 'foreman': 'badge-foreman', 'worker': 'badge-worker' };
+        // Собираем уникальные бригады для фильтра
+        const teamNames = [...new Set(allEmployees.map(e => e.team?.name || e.managedTeam?.name).filter(Boolean))].sort();
 
-        const html = `
-            <div class="orders-toolbar">
-                <div class="search-box">
+        const roleNameMap = { 'senior_manager': 'Старший менеджер', 'foreman': 'Бригадир', 'worker': 'Сборщик' };
+        const roleBadgeClass = { 'senior_manager': 'badge-foreman', 'foreman': 'badge-foreman', 'worker': 'badge-worker' };
+
+        const filterBar = `
+            <div class="orders-toolbar" style="flex-wrap:wrap; gap:10px;">
+                <div class="search-box" style="flex:1; min-width:200px;">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" id="employee-search" placeholder="Поиск по логину, имени или телефону..." value="${searchQuery || ''}">
+                    <input type="text" id="emp-search" placeholder="Поиск по имени, логину, email...">
                 </div>
-            </div>
-            <div class="employees-list">
-                ${employees.length > 0 ? employees.map(emp => {
-                    const fullName = ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim() || emp.username;
-                    const initial = (emp.firstName || emp.username || '?').charAt(0).toUpperCase();
-                    const roleLabel = roleNameMap[emp.roleName] || emp.roleName;
-                    const roleBadge = roleBadgeClass[emp.roleName] || 'badge-worker';
-                    const statusLabel = emp.status === 'active' ? 'В сети' : 'Не в сети';
-                    const statusBadge = emp.status === 'active' ? 'badge-active' : 'badge-inactive';
+                <div class="filter-box">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <select class="filter-select" id="filter-role">
+                        <option value="">Все роли</option>
+                        <option value="senior_manager">Старший менеджер</option>
+                        <option value="foreman">Бригадир</option>
+                        <option value="worker">Сборщик</option>
+                    </select>
+                </div>
+                <div class="filter-box">
+                    <i class="fa-solid fa-circle-dot"></i>
+                    <select class="filter-select" id="filter-status">
+                        <option value="">Все статусы</option>
+                        <option value="active">В сети</option>
+                        <option value="inactive">Не в сети</option>
+                    </select>
+                </div>
+                <div class="filter-box">
+                    <i class="fa-solid fa-people-group"></i>
+                    <select class="filter-select" id="filter-team">
+                        <option value="">Все бригады</option>
+                        <option value="__free__">Свободные</option>
+                        ${teamNames.map(n => `<option value="${n}">${n}</option>`).join('')}
+                    </select>
+                </div>
+            </div>`;
 
-                    let teamHtml = '';
-                    if (emp.teamName) {
-                        teamHtml = `
-                            <div class="employee-team-row">
-                                <i class="fa-solid fa-users"></i>
-                                <span class="employee-team-label">Бригада: ${emp.teamName}</span>
-                                <button class="btn-unassign" data-unassign-id="${emp.id}" title="Убрать из бригады" style="margin-left:8px; color:#ef4444; font-size:12px; cursor:pointer; background:none; border:none;"><i class="fa-solid fa-xmark"></i></button>
-                            </div>`;
-                    } else {
-                        teamHtml = `
-                            <div class="employee-team-row">
-                                <i class="fa-solid fa-users" style="color:#d1d5db"></i>
-                                <span class="employee-team-label" style="color:#9ca3af">Без бригады</span>
-                            </div>`;
+        const renderCards = (list) => {
+            if (list.length === 0) {
+                return '<div style="padding: 30px; text-align: center; color: #666;">Сотрудников не найдено</div>';
+            }
+            return list.map(emp => {
+                const fullName = ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim() || emp.username;
+                const initial = (emp.firstName || emp.username || '?').charAt(0).toUpperCase();
+                const roleName = emp.roleName || (emp.role && emp.role.name) || 'worker';
+                const roleLabel = roleNameMap[roleName] || roleName;
+                const roleBadge = roleBadgeClass[roleName] || 'badge-worker';
+                const statusLabel = emp.status === 'active' ? 'В сети' : 'Не в сети';
+                const statusBadge = emp.status === 'active' ? 'badge-active' : 'badge-inactive';
+
+                const teamName = emp.team?.name || emp.managedTeam?.name || null;
+
+                const teamEl = teamName
+                    ? `<div class="employee-team-row">
+                           <i class="fa-solid fa-users"></i>
+                           <span class="employee-team-label">Бригада: ${teamName}</span>
+                       </div>`
+                    : `<div class="employee-team-row">
+                           <i class="fa-solid fa-user-slash" style="color:#d1d5db"></i>
+                           <span class="employee-team-label" style="color:#9ca3af">Свободен</span>
+                       </div>`;
+
+                return `
+                <div class="employee-card" data-id="${emp.id}" data-role="${roleName}" data-status="${emp.status}" data-team="${teamName || ''}">
+                    <div class="employee-avatar">${initial}</div>
+                    <div class="employee-info">
+                        <div class="employee-name-row">
+                            <span class="employee-name">${fullName}</span>
+                            <span class="badge-role ${roleBadge}">${roleLabel}</span>
+                            <span class="badge-role ${statusBadge}">${statusLabel}</span>
+                        </div>
+                        <div class="employee-detail">${emp.email || ''}</div>
+                        <div class="employee-detail">${emp.phone || 'Телефон не указан'}</div>
+                        ${teamEl}
+                    </div>
+                    <div class="employee-actions">
+                        <button class="btn-icon-sm btn-danger" data-delete-id="${emp.id}" title="Удалить сотрудника">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+        };
+
+        container.innerHTML = `
+            ${filterBar}
+            <div class="employees-list" id="employees-list-container">
+                ${renderCards(allEmployees)}
+            </div>`;
+
+        // ─── Фильтрация на клиенте ────────────────────────────────────────────
+        const applyFilters = () => {
+            const search = container.querySelector('#emp-search')?.value.toLowerCase() || '';
+            const role   = container.querySelector('#filter-role')?.value || '';
+            const status = container.querySelector('#filter-status')?.value || '';
+            const team   = container.querySelector('#filter-team')?.value || '';
+
+            const filtered = allEmployees.filter(emp => {
+                const fullName = ((emp.firstName || '') + ' ' + (emp.lastName || '')).toLowerCase();
+                const matchSearch = !search || fullName.includes(search) || (emp.username || '').toLowerCase().includes(search) || (emp.email || '').toLowerCase().includes(search);
+                const empRole = emp.roleName || (emp.role && emp.role.name) || '';
+                const matchRole = !role || empRole === role;
+                const matchStatus = !status || emp.status === status;
+                const empTeamName = emp.team?.name || emp.managedTeam?.name || null;
+                const matchTeam = !team || (team === '__free__' ? !empTeamName : empTeamName === team);
+                return matchSearch && matchRole && matchStatus && matchTeam;
+            });
+
+            const listContainer = container.querySelector('#employees-list-container');
+            if (listContainer) listContainer.innerHTML = renderCards(filtered);
+
+            // Перепривязываем обработчики удаления
+            attachDeleteHandlers();
+        };
+
+        const attachDeleteHandlers = () => {
+            container.querySelectorAll('[data-delete-id]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const empId = btn.getAttribute('data-delete-id');
+                    if (!confirm('Вы уверены, что хотите удалить сотрудника? Это действие необратимо.')) return;
+                    try {
+                        const res = await fetch(`http://localhost:5000/employees/${empId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!res.ok) throw new Error();
+                        renderEmployeesTab(container);
+                    } catch {
+                        alert('Ошибка удаления сотрудника');
                     }
-
-                    return `
-                    <div class="employee-card" data-id="${emp.id}">
-                        <div class="employee-avatar">${initial}</div>
-                        <div class="employee-info">
-                            <div class="employee-name-row">
-                                <span class="employee-name">${fullName}</span>
-                                <span class="badge-role ${roleBadge}">${roleLabel}</span>
-                                <span class="badge-role ${statusBadge}">${statusLabel}</span>
-                            </div>
-                            <div class="employee-detail">${emp.email || ''}</div>
-                            <div class="employee-detail">${emp.phone || 'Телефон не указан'}</div>
-                            ${teamHtml}
-                        </div>
-                        <div class="employee-actions">
-                            <button class="btn-icon-sm btn-danger" data-delete-id="${emp.id}" title="Удалить">
-                                <i class="fa-regular fa-trash-can"></i>
-                            </button>
-                        </div>
-                    </div>`;
-                }).join('') : '<div style="padding: 30px; text-align: center; color: #666;">Сотрудников не найдено</div>'}
-            </div>
-        `;
-
-        container.innerHTML = html;
-
-        // ─── Поиск ───────────────────────────────
-        const searchInput = container.querySelector('#employee-search');
-        let searchTimeout;
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                clearTimeout(searchTimeout);
-                searchTimeout = setTimeout(() => {
-                    renderEmployeesTab(container, e.target.value.trim());
-                }, 400);
+                });
             });
-            // Восстанавливаем курсор
-            searchInput.focus();
-            searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
-        }
+        };
 
-        // ─── Удаление ────────────────────────────
-        container.querySelectorAll('[data-delete-id]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const empId = btn.getAttribute('data-delete-id');
-                if (!confirm('Вы уверены, что хотите удалить сотрудника?')) return;
-                try {
-                    const res = await fetch(`http://localhost:5000/users/admin/employees/${empId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    if (!res.ok) throw new Error();
-                    renderEmployeesTab(container, searchInput?.value?.trim() || '');
-                } catch {
-                    alert('Ошибка удаления сотрудника');
-                }
-            });
+        // Вешаем обработчики фильтров
+        ['#emp-search', '#filter-role', '#filter-status', '#filter-team'].forEach(sel => {
+            container.querySelector(sel)?.addEventListener('input', applyFilters);
+            container.querySelector(sel)?.addEventListener('change', applyFilters);
         });
+
+        // Первичная привязка удаления
+        attachDeleteHandlers();
 
         // ─── Кнопка "Добавить сотрудника" ─────────
         const addBtn = document.getElementById('btn-add-employee');
         if (addBtn) {
-            addBtn.addEventListener('click', () => {
-                showAddEmployeeModal(container);
-            });
+            addBtn.addEventListener('click', () => showAddEmployeeModal(container));
         }
 
     } catch (error) {
@@ -729,6 +779,7 @@ async function renderEmployeesTab(container, searchQuery = '') {
         container.innerHTML = '<div style="padding: 40px; text-align: center; color: #e53e3e;">Не удалось загрузить список сотрудников</div>';
     }
 }
+
 
 function showAddEmployeeModal(container) {
     // Удаляем старый модал если есть
@@ -807,7 +858,7 @@ function showAddEmployeeModal(container) {
         }
 
         try {
-            const res = await fetch('http://localhost:5000/users/admin/employees', {
+            const res = await fetch('http://localhost:5000/employees', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -832,8 +883,9 @@ function showAddEmployeeModal(container) {
 
 // ─── Вкладка "Все заказы" для старшего менеджера ───────────────
 async function renderManagerOrdersTab(container) {
-    container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка заказов...</div>';
-
+    if (!container.querySelector('.orders-toolbar')) {
+        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка заказов...</div>';
+    }
     updateHeader('Распределение заказов', 'Назначение заказов на бригады');
 
     const token = localStorage.getItem('adminToken');
@@ -850,214 +902,295 @@ async function renderManagerOrdersTab(container) {
         if (!ordersRes.ok) throw new Error('Ошибка загрузки заказов');
         if (!teamsRes.ok) throw new Error('Ошибка загрузки бригад');
 
-        const orders = await ordersRes.json();
+        const allOrders = await ordersRes.json();
         const teams = await teamsRes.json();
 
-        const html = `
-            <div class="orders-toolbar">
-                <div class="search-box">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" id="manager-order-search" placeholder="Поиск по номеру заказа или клиенту...">
-                </div>
-            </div>
-            <div class="orders-list">
-                ${orders.length > 0 ? orders.map(order => {
-                    const statusInfo = getStatusInfo(order.status);
-                    let clientName = 'Неизвестный клиент';
-                    if (order.user) {
-                        clientName = ((order.user.firstName || '') + ' ' + (order.user.lastName || '')).trim() || clientName;
-                    }
-                    const amount = Number(order.totalAmount || 0).toLocaleString('ru-RU');
-                    const itemsList = (order.items || []).map(i =>
-                        '<li>' + (i.product?.name || 'Товар') + ' × ' + i.quantity + '</li>'
-                    ).join('');
-                    const assignedTeamName = order.assignedTeam ? order.assignedTeam.name : null;
+        const statusLabels = {
+            'new': 'Новый',
+            'processing': 'В обработке',
+            'in_progress': 'В работе',
+            'packed': 'Упакован',
+            'ready': 'Готов',
+            'delivered': 'Доставлен',
+        };
 
-                    const actionBtn = assignedTeamName
+        const renderOrders = (orders) => {
+            if (orders.length === 0) {
+                return '<div style="padding: 30px; text-align: center; color: #666;">Нет заказов</div>';
+            }
+            return orders.map(order => {
+                const statusInfo = getStatusInfo(order.status);
+                let clientName = 'Неизвестный клиент';
+                if (order.user) {
+                    clientName = ((order.user.firstName || '') + ' ' + (order.user.lastName || '')).trim() || clientName;
+                }
+                const amount = Number(order.totalAmount || 0).toLocaleString('ru-RU');
+                const itemsList = (order.items || []).map(i =>
+                    '<li>' + (i.product?.name || 'Товар') + ' × ' + i.quantity + '</li>'
+                ).join('');
+                const assignedTeamName = order.assignedTeam ? order.assignedTeam.name : null;
+
+                const isFinished = ['packed', 'ready', 'delivered'].includes(order.status);
+                const actionBtn = isFinished
+                    ? `<span style="font-size:13px; color:#6b7280;"><i class="fa-solid fa-lock"></i> Завершён</span>`
+                    : assignedTeamName
                         ? `<div class="order-team-assigned" style="display:flex; align-items:center;">
                              <i class="fa-solid fa-users"></i> ${assignedTeamName}
                              <button class="btn-unassign btn-manager-unassign" data-order-id="${order.id}">Снять бригаду</button>
                            </div>`
                         : `<button class="btn-primary btn-open-assign" data-order-id="${order.id}" style="padding:8px 16px; font-size:13px;"><i class="fa-solid fa-user-plus"></i> Назначить</button>`;
 
-                    return `
-                    <div class="order-card" data-order-id="${order.id}">
-                        <div class="order-main-info">
-                            <div class="order-header">
-                                <span class="order-number">#${order.id}</span>
-                                <span class="badge ${statusInfo.class}">${statusInfo.label}</span>
-                            </div>
-                            <div class="order-client">Клиент: ${clientName}</div>
-                            <div class="order-date">Дата: ${formatDate(order.createdAt)}</div>
-                            <ul style="margin-top:6px; font-size:13px; color:#4b5563; padding-left:18px;">${itemsList}</ul>
+                return `
+                <div class="order-card" data-order-id="${order.id}" data-status="${order.status || ''}">
+                    <div class="order-main-info">
+                        <div class="order-header">
+                            <span class="order-number">#${order.id}</span>
+                            <span class="badge ${statusInfo.class}">${statusInfo.label}</span>
                         </div>
-                        <div class="order-amount-info">
-                            <div class="order-sum">Сумма: ${amount} ₽</div>
-                        </div>
-                        <div class="order-actions">
-                            ${actionBtn}
-                        </div>
-                    </div>`;
-                }).join('') : '<div style="padding: 30px; text-align: center; color: #666;">Нет заказов для распределения</div>'}
-            </div>
-        `;
+                        <div class="order-client">Клиент: ${clientName}</div>
+                        <div class="order-date">Дата: ${formatDate(order.createdAt)}</div>
+                        <ul style="margin-top:6px; font-size:13px; color:#4b5563; padding-left:18px;">${itemsList}</ul>
+                    </div>
+                    <div class="order-amount-info">
+                        <div class="order-sum">Сумма: ${amount} ₽</div>
+                    </div>
+                    <div class="order-actions">${actionBtn}</div>
+                </div>`;
+            }).join('');
+        };
 
-        container.innerHTML = html;
-
-        // Поиск
-        const searchInput = container.querySelector('#manager-order-search');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                const query = e.target.value.toLowerCase();
-                container.querySelectorAll('.order-card').forEach(card => {
-                    const number = card.querySelector('.order-number')?.textContent.toLowerCase() || '';
-                    const client = card.querySelector('.order-client')?.textContent.toLowerCase() || '';
-                    card.style.display = (number.includes(query) || client.includes(query)) ? '' : 'none';
-                });
-            });
+        // Рендерим оболочку ТОЛЬКО если ее еще нет
+        if (!container.querySelector('.orders-toolbar')) {
+            container.innerHTML = `
+                <div class="orders-toolbar" style="flex-wrap:wrap; gap:10px;">
+                    <div class="search-box" style="flex:1; min-width:200px;">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="manager-order-search" placeholder="Поиск по номеру заказа или клиенту...">
+                    </div>
+                    <div class="filter-box">
+                        <i class="fa-solid fa-filter"></i>
+                        <select class="filter-select" id="manager-status-filter">
+                            <option value="">Все статусы</option>
+                            <option value="new">Новые</option>
+                            <option value="processing">В обработке</option>
+                            <option value="in_progress">В работе</option>
+                            <option value="packed">Упакованные</option>
+                            <option value="ready">Готовые</option>
+                            <option value="delivered">Доставленные</option>
+                            <option value="problem">С проблемами</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="orders-list" id="orders-list-container"></div>
+            `;
+            
+            // Навешиваем обработчики на фильтры один раз
+            container.querySelector('#manager-order-search')?.addEventListener('input', applyOrderFilters);
+            container.querySelector('#manager-status-filter')?.addEventListener('change', applyOrderFilters);
         }
 
-        // Кнопка «Снять бригаду»
-        container.querySelectorAll('.btn-manager-unassign').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                if (!confirm('Вы уверены, что хотите снять бригаду с этого заказа?')) return;
-                const orderId = btn.getAttribute('data-order-id');
-                try {
-                    const res = await fetch(`http://localhost:5000/orders/${orderId}/unassign-team`, {
-                        method: 'PATCH',
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    if (!res.ok) throw new Error('Ошибка при снятии бригады');
-                    renderManagerOrdersTab(container);
-                } catch (err) {
-                    alert(err.message);
-                }
-            });
-        });
-
-        // Кнопка «Назначить» → модалка выбора бригады
-        container.querySelectorAll('.btn-open-assign').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const orderId = btn.getAttribute('data-order-id');
-                showAssignModal({
-                    title: 'Назначить бригаду на заказ #' + orderId,
-                    label: 'Выберите бригаду',
-                    options: teams.map(t => {
-                        const fn = (t.foreman.firstName + ' ' + t.foreman.lastName).trim();
-                        return { value: t.id, text: t.name + ' (бригадир: ' + fn + ', ' + t._count.workers + ' раб.)' };
-                    }),
-                    onSubmit: async (value) => {
-                        const res = await fetch(`http://localhost:5000/orders/${orderId}/assign-team`, {
+        const attachHandlers = () => {
+            // Снять бригаду
+            container.querySelectorAll('.btn-manager-unassign').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm('Снять бригаду с этого заказа?')) return;
+                    const orderId = btn.getAttribute('data-order-id');
+                    try {
+                        const res = await fetch(`http://localhost:5000/orders/${orderId}/unassign-team`, {
                             method: 'PATCH',
-                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ teamId: Number(value) })
+                            headers: { 'Authorization': `Bearer ${token}` }
                         });
-                        if (!res.ok) throw new Error('Ошибка');
+                        if (!res.ok) throw new Error();
                         renderManagerOrdersTab(container);
-                    }
+                    } catch { alert('Ошибка при снятии бригады'); }
                 });
             });
-        });
 
-    } catch (error) {
-        console.error(error);
+            // Назначить бригаду
+            container.querySelectorAll('.btn-open-assign').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const orderId = btn.getAttribute('data-order-id');
+                    showAssignModal({
+                        title: 'Назначить бригаду на заказ #' + orderId,
+                        label: 'Выберите бригаду (заказов в работе указано рядом)',
+                        options: teams.map(t => {
+                            const fn = (t.foreman.firstName + ' ' + t.foreman.lastName).trim();
+                            const activeOrders = t._count?.orders ?? 0;
+                            const load = activeOrders === 0 ? '✅ свободна' : `⚡ ${activeOrders} зак.`;
+                            return { value: t.id, text: `${t.name} — ${load} · бригадир: ${fn} · ${t._count.workers} раб.` };
+                        }),
+                        onSubmit: async (value) => {
+                            const res = await fetch(`http://localhost:5000/orders/${orderId}/assign-team`, {
+                                method: 'PATCH',
+                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ teamId: Number(value) })
+                            });
+                            if (!res.ok) throw new Error('Ошибка');
+                            renderManagerOrdersTab(container);
+                        }
+                    });
+                });
+            });
+        };
+
+        // Вызываем применение фильтров для инициализации (и привязки обработчиков)
+        function applyOrderFilters() {
+            const query = (container.querySelector('#manager-order-search')?.value || '').toLowerCase();
+            const statusFilter = container.querySelector('#manager-status-filter')?.value || '';
+
+            const filtered = allOrders.filter(o => {
+                const num = String(o.id);
+                const client = ((o.user?.firstName || '') + ' ' + (o.user?.lastName || '')).toLowerCase();
+                const matchSearch = !query || num.includes(query) || client.includes(query);
+                const matchStatus = !statusFilter || o.status === statusFilter;
+                return matchSearch && matchStatus;
+            });
+
+            const listEl = container.querySelector('#orders-list-container');
+            if (listEl) listEl.innerHTML = renderOrders(filtered);
+            attachHandlers();
+        }
+
+        applyOrderFilters();
+
+    } catch (err) {
+        console.error(err);
         container.innerHTML = '<div style="padding: 40px; text-align: center; color: #e53e3e;">Не удалось загрузить заказы</div>';
     }
 }
 
+// --- Global Poller ---
+// Авто-обновление страниц (10 секунд)
+setInterval(() => {
+    const activeTab = document.querySelector('.menu-item.active');
+    if (!activeTab) return;
+    const tabName = activeTab.textContent.trim();
+    const container = document.getElementById('content-area');
+    
+    // Only auto-update the main order management tabs
+    if (tabName === 'Все заказы' && typeof renderManagerOrdersTab === 'function') {
+        renderManagerOrdersTab(container);
+    } else if (tabName === 'Заказы бригады' && typeof renderForemanOrdersTab === 'function') {
+        renderForemanOrdersTab(container);
+    } else if (tabName === 'Сборка заказов' && typeof renderPickingTab === 'function') {
+        renderPickingTab(container);
+    }
+}, 10000);
 // ─── Вкладка "Заказы бригады" для бригадира ───────────────────
 async function renderForemanOrdersTab(container) {
-    container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка заказов бригады...</div>';
+    if (!container.querySelector('.orders-toolbar')) {
+        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка заказов бригады...</div>';
+    }
 
     updateHeader('Заказы бригады', 'Распределение заказов по сотрудникам');
 
     const token = localStorage.getItem('adminToken');
-    try {
-        const [ordersRes, membersRes] = await Promise.all([
-            fetch('http://localhost:5000/orders/foreman/team-orders', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            }),
-            fetch('http://localhost:5000/orders/foreman/team-members', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            })
-        ]);
+    let orders = [];
+    let workers = [];
 
-        if (!ordersRes.ok) throw new Error('Ошибка загрузки заказов');
-        if (!membersRes.ok) throw new Error('Ошибка загрузки сотрудников');
+    const loadDataAndRender = async () => {
+        try {
+            const [ordersRes, membersRes] = await Promise.all([
+                fetch('http://localhost:5000/orders/foreman/team-orders', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }),
+                fetch('http://localhost:5000/orders/foreman/team-members', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                })
+            ]);
 
-        const orders = await ordersRes.json();
-        const membersData = await membersRes.json();
-        const workers = membersData.members || [];
+            if (!ordersRes.ok || !membersRes.ok) {
+                throw new Error('Ошибка загрузки данных бригады');
+            }
 
-        const html = `
-            <div class="orders-toolbar">
-                <div class="search-box">
+            orders = await ordersRes.json();
+            const membersData = await membersRes.json();
+            workers = membersData.members || [];
+            
+            applyForemanFilters();
+        } catch(e) {
+            console.error(e);
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: #e53e3e;">Не удалось загрузить заказы бригады</div>';
+        }
+    };
+
+    if (!container.querySelector('.orders-toolbar')) {
+        container.innerHTML = `
+            <div class="orders-toolbar" style="flex-wrap:wrap; gap:10px;">
+                <div class="search-box" style="flex:1; min-width:200px;">
                     <i class="fa-solid fa-magnifying-glass"></i>
                     <input type="text" id="foreman-order-search" placeholder="Поиск по номеру заказа или клиенту...">
                 </div>
             </div>
-            <div class="orders-list">
-                ${orders.length > 0 ? orders.map(order => {
-                    const statusInfo = getStatusInfo(order.status);
-                    let clientName = 'Неизвестный клиент';
-                    if (order.user) {
-                        clientName = ((order.user.firstName || '') + ' ' + (order.user.lastName || '')).trim() || clientName;
-                    }
-                    const amount = Number(order.totalAmount || 0).toLocaleString('ru-RU');
-                    const itemsList = (order.items || []).map(i =>
-                        '<li>' + (i.product?.name || 'Товар') + ' × ' + i.quantity + '</li>'
-                    ).join('');
-                    const assignedWorker = order.assignedWorker;
-
-                    let actionBtn = '';
-                    if (assignedWorker) {
-                        const wName = (assignedWorker.firstName + ' ' + assignedWorker.lastName).trim();
-                        actionBtn = `
-                            <div class="order-team-assigned" style="display:flex; align-items:center;">
-                                <i class="fa-solid fa-user"></i> ${wName}
-                                <button class="btn-unassign btn-foreman-unassign" data-order-id="${order.id}">Снять сотрудника</button>
-                            </div>`;
-                    } else {
-                        actionBtn = `<button class="btn-primary btn-open-assign-worker" data-order-id="${order.id}" style="padding:8px 16px; font-size:13px;"><i class="fa-solid fa-user-plus"></i> Назначить</button>`;
-                    }
-
-                    return `
-                    <div class="order-card" data-order-id="${order.id}">
-                        <div class="order-main-info">
-                            <div class="order-header">
-                                <span class="order-number">#${order.id}</span>
-                                <span class="badge ${statusInfo.class}">${statusInfo.label}</span>
-                            </div>
-                            <div class="order-client">Клиент: ${clientName}</div>
-                            <div class="order-date">Дата: ${formatDate(order.createdAt)}</div>
-                            <ul style="margin-top:6px; font-size:13px; color:#4b5563; padding-left:18px;">${itemsList}</ul>
-                        </div>
-                        <div class="order-amount-info">
-                            <div class="order-sum">Сумма: ${amount} ₽</div>
-                        </div>
-                        <div class="order-actions">
-                            ${actionBtn}
-                        </div>
-                    </div>`;
-                }).join('') : '<div style="padding: 30px; text-align: center; color: #666;">Нет заказов для распределения</div>'}
-            </div>
+            <div class="orders-list" id="foreman-orders-list"></div>
         `;
+        container.querySelector('#foreman-order-search')?.addEventListener('input', applyForemanFilters);
+    }
 
-        container.innerHTML = html;
-
-        // Поиск
-        const searchInput = container.querySelector('#foreman-order-search');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                const query = e.target.value.toLowerCase();
-                container.querySelectorAll('.order-card').forEach(card => {
-                    const number = card.querySelector('.order-number')?.textContent.toLowerCase() || '';
-                    const client = card.querySelector('.order-client')?.textContent.toLowerCase() || '';
-                    card.style.display = (number.includes(query) || client.includes(query)) ? '' : 'none';
-                });
-            });
+    const renderForemanOrders = (orderList) => {
+        if (orderList.length === 0) {
+            return '<div style="padding: 30px; text-align: center; color: #666;">Нет заказов для распределения</div>';
         }
+        return orderList.map(order => {
+            const statusInfo = getStatusInfo(order.status);
+            let clientName = 'Неизвестный клиент';
+            if (order.user) {
+                clientName = ((order.user.firstName || '') + ' ' + (order.user.lastName || '')).trim() || clientName;
+            }
+            const amount = Number(order.totalAmount || 0).toLocaleString('ru-RU');
+            const itemsList = (order.items || []).map(i =>
+                '<li>' + (i.product?.name || 'Товар') + ' × ' + i.quantity + '</li>'
+            ).join('');
+            const assignedWorker = order.assignedWorker;
 
+            let actionBtn = '';
+            if (assignedWorker) {
+                const wName = (assignedWorker.firstName + ' ' + assignedWorker.lastName).trim();
+                actionBtn = `
+                    <div class="order-team-assigned" style="display:flex; align-items:center;">
+                        <i class="fa-solid fa-user"></i> ${wName}
+                        <button class="btn-unassign btn-foreman-unassign" data-order-id="${order.id}">Снять сотрудника</button>
+                    </div>`;
+            } else {
+                actionBtn = `<button class="btn-primary btn-open-assign-worker" data-order-id="${order.id}" style="padding:8px 16px; font-size:13px;"><i class="fa-solid fa-user-plus"></i> Назначить</button>`;
+            }
+
+            return `
+            <div class="order-card" data-order-id="${order.id}">
+                <div class="order-main-info">
+                    <div class="order-header">
+                        <span class="order-number">#${order.id}</span>
+                        <span class="badge ${statusInfo.class}">${statusInfo.label}</span>
+                    </div>
+                    <div class="order-client">Клиент: ${clientName}</div>
+                    <div class="order-date">Дата: ${formatDate(order.createdAt)}</div>
+                    <ul style="margin-top:6px; font-size:13px; color:#4b5563; padding-left:18px;">${itemsList}</ul>
+                </div>
+                <div class="order-amount-info">
+                    <div class="order-sum">Сумма: ${amount} ₽</div>
+                </div>
+                <div class="order-actions">
+                    ${actionBtn}
+                </div>
+            </div>`;
+        }).join('');
+    };
+
+    function applyForemanFilters() {
+        const query = (container.querySelector('#foreman-order-search')?.value || '').toLowerCase();
+        const filtered = orders.filter(o => {
+            const num = String(o.id);
+            const client = ((o.user?.firstName || '') + ' ' + (o.user?.lastName || '')).toLowerCase();
+            return !query || num.includes(query) || client.includes(query);
+        });
+        const listEl = container.querySelector('#foreman-orders-list');
+        if (listEl) {
+            listEl.innerHTML = renderForemanOrders(filtered);
+            attachForemanHandlers();
+        }
+    }
+
+    const attachForemanHandlers = () => {
         // Кнопка «Снять сотрудника»
         container.querySelectorAll('.btn-foreman-unassign').forEach(btn => {
             btn.addEventListener('click', async () => {
@@ -1069,7 +1202,7 @@ async function renderForemanOrdersTab(container) {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
                     if (!res.ok) throw new Error('Ошибка при снятии сотрудника');
-                    renderForemanOrdersTab(container);
+                    await loadDataAndRender();
                 } catch (err) {
                     alert(err.message);
                 }
@@ -1083,10 +1216,12 @@ async function renderForemanOrdersTab(container) {
                 showAssignModal({
                     title: 'Назначить сотрудника на заказ #' + orderId,
                     label: 'Выберите сотрудника',
-                    options: workers.map(w => {
-                        const name = (w.firstName + ' ' + w.lastName).trim();
-                        return { value: w.id, text: name + ' (заказов: ' + w.activeOrdersCount + ')' };
-                    }),
+                    options: workers
+                        .filter(w => !w.breakStatus || w.breakStatus === 'working')
+                        .map(w => {
+                            const name = (w.firstName + ' ' + w.lastName).trim();
+                            return { value: w.id, text: name + ' (заказов: ' + w.activeOrdersCount + ')' };
+                        }),
                     onSubmit: async (value) => {
                         const res = await fetch(`http://localhost:5000/orders/${orderId}/assign-worker`, {
                             method: 'PATCH',
@@ -1094,16 +1229,14 @@ async function renderForemanOrdersTab(container) {
                             body: JSON.stringify({ workerId: Number(value) })
                         });
                         if (!res.ok) throw new Error('Ошибка');
-                        renderForemanOrdersTab(container);
+                        await loadDataAndRender();
                     }
                 });
             });
         });
+    }; // End attachForemanHandlers
 
-    } catch (error) {
-        console.error(error);
-        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #e53e3e;">Не удалось загрузить заказы бригады</div>';
-    }
+    await loadDataAndRender();
 }
 
 // ─── Вкладка "Сотрудники бригады" для бригадира ───────────────
@@ -1135,6 +1268,15 @@ async function renderTeamMembersTab(container) {
                     const statusLabel = w.status === 'active' ? 'В сети' : 'Не в сети';
                     const statusBadge = w.status === 'active' ? 'badge-active' : 'badge-inactive';
 
+                    let breakAction = '';
+                    if (w.breakStatus === 'break_requested') {
+                        breakAction = `<button class="btn-primary btn-approve-break" data-worker-id="${w.id}" style="margin-top: 8px; font-size: 12px; padding: 4px 8px;">Одобрить перерыв</button>`;
+                    } else if (w.breakStatus === 'break_approved') {
+                        breakAction = `<div style="margin-top: 8px; font-size: 12px; color: #f59e0b;"><i class="fa-solid fa-hourglass-half"></i> Завершает заказ (перерыв)</div>`;
+                    } else if (w.breakStatus === 'on_break') {
+                        breakAction = `<div style="margin-top: 8px; font-size: 12px; color: #f59e0b;"><i class="fa-solid fa-mug-hot"></i> На перерыве</div>`;
+                    }
+
                     return `
                     <div class="employee-card">
                         <div class="employee-avatar">${initial}</div>
@@ -1151,6 +1293,7 @@ async function renderTeamMembersTab(container) {
                             <div style="text-align: center;">
                                 <div style="font-size: 24px; font-weight: 700; color: #0b1e8e;">${w.activeOrdersCount}</div>
                                 <div style="font-size: 12px; color: #6b7280;">активных заказов</div>
+                                ${breakAction}
                             </div>
                         </div>
                     </div>`;
@@ -1159,6 +1302,27 @@ async function renderTeamMembersTab(container) {
         `;
 
         container.innerHTML = html;
+
+        container.querySelectorAll('.btn-approve-break').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const workerId = btn.getAttribute('data-worker-id');
+                const originalHtml = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                try {
+                    const response = await fetch(`http://localhost:5000/employees/${workerId}/break/approve`, {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!response.ok) throw new Error();
+                    renderTeamMembersTab(container);
+                } catch {
+                    alert('Ошибка одобрения перерыва');
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                }
+            });
+        });
 
     } catch (error) {
         console.error(error);
@@ -1172,9 +1336,10 @@ function showAssignModal({ title, label, options, onSubmit }) {
     const old = document.querySelector('.assign-modal-overlay');
     if (old) old.remove();
 
-    const optionsHtml = options.map(o =>
-        `<option value="${o.value}">${o.text}</option>`
-    ).join('');
+    const optionsHtml = options.map(o => {
+        const sel = o.selected ? 'selected' : '';
+        return `<option value="${o.value}" ${sel}>${o.text}</option>`;
+    }).join('');
 
     const overlay = document.createElement('div');
     overlay.className = 'assign-modal-overlay';
@@ -1228,18 +1393,239 @@ function showAssignModal({ title, label, options, onSubmit }) {
     });
 }
 
+// ─── Расширенная модалка редактирования/создания бригады ─────────────
+function showEditTeamModal({ team, employees, onSave, onAddWorker, onRemoveWorker, onClose }) {
+    const old = document.querySelector('.assign-modal-overlay');
+    if (old) old.remove();
+
+    const isCreate = !team.id;
+
+    // Все бригадиры по роли
+    const allForemen = employees.filter(e => e.role && e.role.name === 'foreman');
+    // Свободные сборщики (без бригады)
+    const freeWorkers = employees.filter(e => e.role && e.role.name === 'worker' && !e.team);
+    // Текущие сборщики этой бригады
+    const currentWorkers = isCreate ? [] : employees.filter(e => e.team && e.team.id === team.id);
+
+    const foremenOptions = allForemen.map(f => {
+        const isBusy = !!(f.managedTeam && f.managedTeam.id !== team.id);
+        const isCurrent = f.id === team.foremanId;
+        const sel = isCurrent ? 'selected' : '';
+        const tag = isCurrent ? ' ✓ Текущий' : isBusy ? ` (руководит: ${f.managedTeam.name})` : ' — свободен';
+        return `<option value="${f.id}" ${sel} style="color:${isBusy ? '#9ca3af' : '#1a1a1a'}">${f.firstName} ${f.lastName}${tag}</option>`;
+    }).join('');
+
+    const freeWorkersOptions = freeWorkers.length > 0
+        ? freeWorkers.map(w => `<option value="${w.id}">${w.firstName} ${w.lastName} — ${w.email}</option>`).join('')
+        : '<option value="" disabled>Нет свободных сборщиков</option>';
+
+    const workersListHtml = currentWorkers.length > 0
+        ? currentWorkers.map(w => `
+            <div class="team-member-row" data-worker-id="${w.id}">
+                <div>
+                    <span style="font-size:14px; font-weight:500;">${w.firstName} ${w.lastName}</span>
+                    <div style="font-size:12px; color:#6b7280;">${w.email}</div>
+                </div>
+                <button class="btn-delete btn-remove-worker" data-id="${w.id}" style="padding:4px 10px; font-size:12px;">
+                    <i class="fa-solid fa-user-minus"></i> Убрать
+                </button>
+            </div>`).join('')
+        : `<div style="padding:12px; text-align:center; color:#9ca3af; font-size:13px;">В бригаде пока нет сборщиков</div>`;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'assign-modal-overlay';
+    overlay.innerHTML = `
+        <div class="assign-modal" style="width:580px; max-width:95vw;">
+            <div class="assign-modal-header">
+                <h3>${isCreate ? 'Создать бригаду' : 'Редактировать бригаду'}</h3>
+                <button class="assign-modal-close">&times;</button>
+            </div>
+            <div class="assign-modal-body" style="display:flex; flex-direction:column; gap:16px;">
+
+                <div>
+                    <label class="assign-modal-label">Название бригады</label>
+                    <input type="text" id="edit-team-name" value="${team.name || ''}" placeholder="Например: Бригада Альфа"
+                        style="width:100%; padding:10px 12px; border:1px solid #e1e4e8; border-radius:8px; font-size:14px; outline:none; box-sizing:border-box;">
+                </div>
+
+                <div>
+                    <label class="assign-modal-label">Бригадир
+                        <span style="font-weight:400; color:#6b7280; margin-left:4px;">(выделены занятые)</span>
+                    </label>
+                    <select id="edit-team-foreman" style="width:100%; padding:10px 12px; border:1px solid #e1e4e8; border-radius:8px; font-size:14px; outline:none; box-sizing:border-box;">
+                        ${!team.foremanId ? '<option value="">— Выберите бригадира —</option>' : ''}
+                        ${foremenOptions}
+                    </select>
+                </div>
+
+                ${!isCreate ? `
+                <div style="border-top:1px solid #e5e7eb; padding-top:16px;">
+                    <h4 style="font-size:14px; font-weight:600; margin-bottom:10px; color:#374151;">Сборщики в бригаде</h4>
+                    <div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; margin-bottom:12px;">
+                        <div id="workers-list" style="max-height:180px; overflow-y:auto;">${workersListHtml}</div>
+                    </div>
+                    <label class="assign-modal-label">Добавить свободного сборщика</label>
+                    <div style="display:flex; gap:8px;">
+                        <select id="add-worker-select" style="flex:1; padding:10px 12px; border:1px solid #e1e4e8; border-radius:8px; font-size:14px; outline:none;">
+                            <option value="">— Выберите сборщика —</option>
+                            ${freeWorkersOptions}
+                        </select>
+                        <button class="btn-primary" id="btn-add-worker" style="padding:10px 16px; white-space:nowrap;">
+                            <i class="fa-solid fa-plus"></i> Добавить
+                        </button>
+                    </div>
+                </div>` : ''}
+            </div>
+            <div class="assign-modal-footer">
+                <button class="btn-secondary assign-modal-cancel">Отмена</button>
+                <button class="btn-primary" id="btn-save-team">
+                    <i class="fa-solid fa-${isCreate ? 'plus' : 'check'}"></i> ${isCreate ? 'Создать бригаду' : 'Сохранить'}
+                </button>
+            </div>
+        </div>
+    `;
+
+    // Стиль для строк участников
+    const style = document.createElement('style');
+    style.textContent = `.team-member-row { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid #f3f4f6; } .team-member-row:last-child { border-bottom:none; }`;
+    overlay.appendChild(style);
+
+    document.body.appendChild(overlay);
+
+    const close = () => { overlay.remove(); if (onClose) onClose(); };
+    overlay.querySelector('.assign-modal-close').addEventListener('click', close);
+    overlay.querySelector('.assign-modal-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    // ── Сохранить основные параметры ──
+    overlay.querySelector('#btn-save-team').addEventListener('click', async () => {
+        const btn = overlay.querySelector('#btn-save-team');
+        const name = overlay.querySelector('#edit-team-name').value.trim();
+        const foremanId = overlay.querySelector('#edit-team-foreman').value;
+        if (!name) { alert('Введите название бригады'); return; }
+        if (!foremanId) { alert('Выберите бригадира'); return; }
+        const isBusyForeman = allForemen.find(f => f.id === Number(foremanId));
+        if (isBusyForeman && isBusyForeman.managedTeam && isBusyForeman.managedTeam.id !== team.id) {
+            if (!confirm(`${isBusyForeman.firstName} ${isBusyForeman.lastName} уже руководит бригадой "${isBusyForeman.managedTeam.name}". Заменить?`)) return;
+        }
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        try {
+            await onSave({ name, foremanId: Number(foremanId) });
+            if (isCreate) close();
+            else btn.innerHTML = '<i class="fa-solid fa-check"></i> Сохранено!';
+        } catch (err) {
+            alert(err.message || 'Ошибка сохранения');
+            btn.innerHTML = orig;
+        }
+        btn.disabled = false;
+    });
+
+    // ── Убрать сборщика ──
+    if (!isCreate) {
+        overlay.querySelectorAll('.btn-remove-worker').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const wId = btn.getAttribute('data-id');
+                const orig = btn.innerHTML;
+                btn.innerHTML = '...';
+                btn.disabled = true;
+                try {
+                    await onRemoveWorker(wId);
+                    const row = overlay.querySelector(`.team-member-row[data-worker-id="${wId}"]`);
+                    if (row) row.remove();
+                    const list = overlay.querySelector('#workers-list');
+                    if (list && list.children.length === 0) {
+                        list.innerHTML = '<div style="padding:12px; text-align:center; color:#9ca3af; font-size:13px;">В бригаде пока нет сборщиков</div>';
+                    }
+                } catch { btn.innerHTML = orig; btn.disabled = false; }
+            });
+        });
+
+        // ── Добавить сборщика ──
+        overlay.querySelector('#btn-add-worker').addEventListener('click', async () => {
+            const btn = overlay.querySelector('#btn-add-worker');
+            const sel = overlay.querySelector('#add-worker-select');
+            const wId = sel.value;
+            if (!wId) return;
+            const origH = btn.innerHTML;
+            btn.innerHTML = '...';
+            btn.disabled = true;
+            try {
+                await onAddWorker(wId);
+                // Убираем из дропдауна и добавляем в список
+                const opt = sel.querySelector(`option[value="${wId}"]`);
+                const wName = opt ? opt.text : `#${wId}`;
+                opt?.remove();
+                sel.value = '';
+                const list = overlay.querySelector('#workers-list');
+                const empty = list.querySelector('div[style*="text-align:center"]');
+                if (empty) empty.remove();
+                const div = document.createElement('div');
+                div.className = 'team-member-row';
+                div.setAttribute('data-worker-id', wId);
+                div.innerHTML = `<div><span style="font-size:14px;font-weight:500;">${wName.split(' — ')[0]}</span><div style="font-size:12px;color:#6b7280;">${wName.split(' — ')[1] || ''}</div></div>
+                    <button class="btn-delete btn-remove-worker" data-id="${wId}" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-user-minus"></i> Убрать</button>`;
+                // Повесить обработчик на новую кнопку
+                div.querySelector('.btn-remove-worker').addEventListener('click', async (e) => {
+                    const b = e.currentTarget;
+                    const o = b.innerHTML; b.innerHTML = '...'; b.disabled = true;
+                    try { await onRemoveWorker(wId); div.remove(); } catch { b.innerHTML = o; b.disabled = false; }
+                });
+                list.appendChild(div);
+            } catch (err) {
+                alert(err.message || 'Ошибка');
+            }
+            btn.innerHTML = origH;
+            btn.disabled = false;
+        });
+    }
+}
+
+
 // ─── Вкладка "Сборка заказов" для сотрудника ──────────────────
 async function renderPickingTab(container) {
-    container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка ваших заказов...</div>';
+    if (!container.querySelector('.picking-container')) {
+        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка ваших заказов...</div>';
+    }
     updateHeader('Сборка заказов', 'Соберите текущий заказ товар за товаром');
 
     const token = localStorage.getItem('adminToken');
     try {
-        const res = await fetch('http://localhost:5000/orders/worker/my-orders', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) throw new Error('Ошибка загрузки');
-        const orders = await res.json();
+        const [resParams, userRes] = await Promise.all([
+            fetch('http://localhost:5000/orders/worker/orders', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }),
+            fetch('http://localhost:5000/users/me', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+        ]);
+        if (!resParams.ok) throw new Error('Ошибка загрузки заказов');
+        const orders = await resParams.json();
+        const me = await userRes.json();
+        const breakStatus = me.breakStatus || 'working';
+
+        if (breakStatus === 'on_break') {
+            container.innerHTML = `
+                <div style="padding: 60px 40px; text-align: center;">
+                    <div style="font-size: 64px; color: #f59e0b; margin-bottom: 20px;"><i class="fa-solid fa-mug-hot"></i></div>
+                    <h2 style="color: #1f2937; margin-bottom: 10px;">Вы на перерыве</h2>
+                    <p style="color: #6b7280; margin-bottom: 30px;">Отдохните и возвращайтесь с новыми силами!</p>
+                    <button class="btn-primary btn-end-break" style="padding: 12px 32px; font-size: 16px;">
+                        <i class="fa-solid fa-briefcase"></i> Вернуться к работе
+                    </button>
+                </div>
+            `;
+            container.querySelector('.btn-end-break').addEventListener('click', async (e) => {
+                const btn = e.currentTarget;
+                const orig = btn.innerHTML; btn.innerHTML = '...'; btn.disabled = true;
+                try {
+                    await fetch('http://localhost:5000/employees/break/end', { method: 'PATCH', headers: { 'Authorization': `Bearer ${token}` } });
+                    renderPickingTab(container);
+                } catch { btn.innerHTML = orig; btn.disabled = false; }
+            });
+            return;
+        }
 
         if (orders.length === 0) {
             container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">У вас пока нет назначенных заказов</div>';
@@ -1248,7 +1634,7 @@ async function renderPickingTab(container) {
 
         // Берем активный заказ (workerQueueStatus === 'active')
         const activeOrder = orders.find(o => o.workerQueueStatus === 'active') || orders[0];
-        const queuedOrder = orders.find(o => o.workerQueueStatus === 'queued');
+        const queuedOrder = orders.find(o => o.workerQueueStatus === 'queued' && o.id !== activeOrder.id);
 
         // Ищем первый неупакованный товар в активном заказе
         const items = activeOrder.items || [];
@@ -1267,7 +1653,10 @@ async function renderPickingTab(container) {
                 <div class="picking-item-step">
                     <div style="font-size: 48px; color: #10b981; margin-bottom: 10px;"><i class="fa-solid fa-circle-check"></i></div>
                     <div class="picking-item-name">Заказ #${activeOrder.id} собран!</div>
-                    <p style="color: #6b7280;">Все товары упакованы. Сообщите бригадиру о готовности.</p>
+                    <p style="color: #6b7280;">Все товары упакованы. Нажмите "Завершить заказ", чтобы сдать его.</p>
+                    <button class="btn-primary btn-finish-picking" data-order-id="${activeOrder.id}" style="margin-top:20px; padding: 12px 32px; font-size: 18px;">
+                        <i class="fa-solid fa-flag-checkered"></i> Завершить заказ
+                    </button>
                 </div>
             `;
         } else if (currentItem) {
@@ -1287,6 +1676,9 @@ async function renderPickingTab(container) {
                     <div class="picking-actions">
                         <button class="btn-primary btn-pack-item" data-item-id="${currentItem.id}" style="padding: 12px 32px; font-size: 16px;">
                             <i class="fa-solid fa-box"></i> Упаковано
+                        </button>
+                        <button class="btn-secondary btn-item-error" data-item-id="${currentItem.id}" style="padding: 12px 32px; font-size: 16px; margin-top: 10px; color: #dc2626; border-color: #fca5a5;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Нет в ячейке / Ошибка
                         </button>
                     </div>
                 </div>
@@ -1308,6 +1700,11 @@ async function renderPickingTab(container) {
 
         container.innerHTML = `
             <div class="picking-container">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+                    ${breakStatus === 'working' ? `<button class="btn-secondary btn-request-break"><i class="fa-solid fa-mug-hot"></i> Уйти на перерыв</button>` :
+                      breakStatus === 'break_requested' ? `<button class="btn-secondary" disabled style="opacity:0.7"><i class="fa-solid fa-clock"></i> Ожидает одобрения</button>` :
+                      breakStatus === 'break_approved' ? `<button class="btn-secondary" disabled style="opacity:0.7; color:#f59e0b; border-color:#fef3c7;"><i class="fa-solid fa-hourglass-half"></i> Доработайте заказ</button>` : ''}
+                </div>
                 <div class="picking-active-box">
                     <div class="picking-header">
                         <h3>Заказ #${activeOrder.id}</h3>
@@ -1364,8 +1761,232 @@ async function renderPickingTab(container) {
             });
         }
 
+        // Обработка клика "Ошибка товара"
+        const errorBtn = container.querySelector('.btn-item-error');
+        if (errorBtn) {
+            errorBtn.addEventListener('click', async () => {
+                const itemId = errorBtn.getAttribute('data-item-id');
+                if (!confirm('Отметить товар как проблемный (отсутствует или брак)? Это повлияет на ваш % ошибок.')) return;
+                
+                try {
+                    const res = await fetch(`http://localhost:5000/orders/items/${itemId}/pack`, {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ packed: true, hasError: true })
+                    });
+                    if (!res.ok) throw new Error('Ошибка');
+                    renderPickingTab(container);
+                } catch (err) { alert('Не удалось обновить статус'); }
+            });
+        }
+
+        // Обработка "Завершить заказ"
+        const finishBtn = container.querySelector('.btn-finish-picking');
+        if (finishBtn) {
+            finishBtn.addEventListener('click', async () => {
+                const orderId = finishBtn.getAttribute('data-order-id');
+                const orig = finishBtn.innerHTML;
+                finishBtn.disabled = true;
+                finishBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                try {
+                    const res = await fetch(`http://localhost:5000/orders/${orderId}/finish-picking`, {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!res.ok) throw new Error('Ошибка');
+                    renderPickingTab(container);
+                } catch (err) {
+                    alert('Не удалось завершить заказ');
+                    finishBtn.disabled = false;
+                    finishBtn.innerHTML = orig;
+                }
+            });
+        }
+
+        // Обработка "Уйти на перерыв"
+        const breakBtn = container.querySelector('.btn-request-break');
+        if (breakBtn) {
+            breakBtn.addEventListener('click', async () => {
+                const orig = breakBtn.innerHTML;
+                breakBtn.disabled = true;
+                breakBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                try {
+                    const res = await fetch('http://localhost:5000/employees/break/request', {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.message || 'Ошибка');
+                    }
+                    alert('Запрос на перерыв отправлен бригадиру!');
+                    breakBtn.innerHTML = orig;
+                    breakBtn.disabled = false;
+                } catch (err) {
+                    alert(err.message);
+                    breakBtn.innerHTML = orig;
+                    breakBtn.disabled = false;
+                }
+            });
+        }
+
     } catch (err) {
         console.error(err);
         container.innerHTML = '<div style="padding: 40px; text-align: center; color: #e53e3e;">Не удалось загрузить данные</div>';
     }
 }
+
+// ─── Вкладка "Управление бригадами" для Старшего менеджера ──────────
+async function renderTeamsManagerTab(container) {
+    container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Загрузка списка бригад...</div>';
+    updateHeader('Управление бригадами', 'Создание и редактирование рабочих команд склада');
+
+    const token = localStorage.getItem('adminToken');
+    try {
+        const res = await fetch('http://localhost:5000/teams', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Ошибка при получении бригад');
+        const teams = await res.json();
+
+        const html = `
+            <div class="orders-toolbar" style="display:flex; justify-content:flex-end;">
+                <button class="btn-primary" id="btn-create-team"><i class="fa-solid fa-plus"></i> Добавить бригаду</button>
+            </div>
+            <div class="employees-list">
+                ${teams.length > 0 ? teams.map(t => {
+                    const fName = t.foreman ? (t.foreman.firstName + ' ' + t.foreman.lastName).trim() : 'Нет бригадира';
+                    const workersList = (t.workers || []).map(w =>
+                        `<span style="font-size:12px; background:#f3f4f6; border-radius:4px; padding:2px 8px; margin:2px 2px 0 0; display:inline-block;">${w.firstName} ${w.lastName}</span>`
+                    ).join('');
+                    return `
+                    <div class="employee-card" style="flex-direction:column; align-items:stretch; gap:12px; padding:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                            <div>
+                                <span style="font-size:17px; font-weight:600; color:#1a1a1a;">${t.name}</span>
+                                <div style="font-size:13px; color:#6b7280; margin-top:4px;"><i class="fa-solid fa-user-tie"></i> Бригадир: ${fName}</div>
+                                <div style="font-size:13px; color:#6b7280;"><i class="fa-solid fa-users"></i> Сборщиков: ${t._count?.workers || 0}</div>
+                            </div>
+                            <div class="employee-actions">
+                                <button class="btn-edit btn-edit-team" data-team-id="${t.id}" data-team-name="${t.name}" data-foreman-id="${t.foremanId}">
+                                    <i class="fa-solid fa-pen"></i> Изменить
+                                </button>
+                                <button class="btn-delete btn-delete-team" data-team-id="${t.id}">
+                                    <i class="fa-solid fa-trash"></i> Удалить
+                                </button>
+                            </div>
+                        </div>
+                        ${t.workers && t.workers.length > 0 ? `<div style="border-top:1px solid #f3f4f6; padding-top:10px;">${workersList}</div>` : ''}
+                    </div>`;
+                }).join('') : '<div style="padding: 30px; text-align: center; color: #666;">Пока нет созданных бригад</div>'}
+            </div>
+        `;
+        container.innerHTML = html;
+
+        // Удаление бригады
+        container.querySelectorAll('.btn-delete-team').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Удалить бригаду? Все прикреплённые сотрудники станут свободными (не удаляются из системы).')) return;
+                const teamId = btn.getAttribute('data-team-id');
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                try {
+                    const dRes = await fetch(`http://localhost:5000/teams/${teamId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!dRes.ok) throw new Error();
+                    renderTeamsManagerTab(container);
+                } catch {
+                    alert('Ошибка удаления');
+                    btn.innerHTML = '<i class="fa-solid fa-trash"></i> Удалить';
+                }
+            });
+        });
+
+        // Изменение бригады
+        container.querySelectorAll('.btn-edit-team').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const teamId = btn.getAttribute('data-team-id');
+                const teamName = btn.getAttribute('data-team-name');
+                const foremanId = parseInt(btn.getAttribute('data-foreman-id'), 10);
+
+                const eRes = await fetch('http://localhost:5000/employees', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!eRes.ok) return alert('Ошибка загрузки сотрудников');
+                const employees = await eRes.json();
+
+                showEditTeamModal({
+                    team: { id: parseInt(teamId, 10), name: teamName, foremanId },
+                    employees,
+                    onSave: async (data) => {
+                        const pRes = await fetch(`http://localhost:5000/teams/${teamId}`, {
+                            method: 'PATCH',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: data.name, foremanId: data.foremanId })
+                        });
+                        if (!pRes.ok) {
+                            const errBody = await pRes.json().catch(() => ({}));
+                            throw new Error(errBody.message || 'Ошибка сохранения');
+                        }
+                        renderTeamsManagerTab(container);
+                    },
+                    onAddWorker: async (workerId) => {
+                        const pRes = await fetch(`http://localhost:5000/teams/${teamId}/workers`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ workerId: Number(workerId) })
+                        });
+                        if (!pRes.ok) {
+                            const errBody = await pRes.json().catch(() => ({}));
+                            throw new Error(errBody.message || 'Ошибка добавления');
+                        }
+                    },
+                    onRemoveWorker: async (workerId) => {
+                        const dRes = await fetch(`http://localhost:5000/teams/${teamId}/workers/${workerId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!dRes.ok) {
+                            const errBody = await dRes.json().catch(() => ({}));
+                            throw new Error(errBody.message || 'Ошибка удаления');
+                        }
+                    }
+                });
+            });
+        });
+
+        // Создание бригады
+        document.getElementById('btn-create-team').addEventListener('click', async () => {
+            const eRes = await fetch('http://localhost:5000/employees', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!eRes.ok) return alert('Не удалось загрузить сотрудников');
+            const employees = await eRes.json();
+
+            const hasForemen = employees.some(e => e.role && e.role.name === 'foreman');
+            if (!hasForemen) return alert('Нет бригадиров в системе. Сначала добавьте сотрудника с ролью Бригадир.');
+
+            showEditTeamModal({
+                team: { id: null, name: '', foremanId: null },
+                employees,
+                onSave: async (data) => {
+                    const pRes = await fetch('http://localhost:5000/teams', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: data.name, foremanId: data.foremanId })
+                    });
+                    if (!pRes.ok) {
+                        const errBody = await pRes.json().catch(() => ({}));
+                        throw new Error(errBody.message || 'Ошибка создания');
+                    }
+                    renderTeamsManagerTab(container);
+                },
+                onAddWorker: null,
+                onRemoveWorker: null,
+                onClose: null
+            });
+        });
+
+    } catch (err) {
+        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #e53e3e;">Не удалось загрузить бригады</div>';
+    }
+}
+
+

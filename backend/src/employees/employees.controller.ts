@@ -1,83 +1,96 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
     Param,
     ParseIntPipe,
     Patch,
     Post,
     Query,
+    Request,
     UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { CreateEmployeeDto } from './dto/create-employee.dto';
-import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
+import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { EmployeesService } from './employees.service';
 
-@ApiTags('Employees (Admin)')
-@Controller('admin')
+@ApiTags('Employees')
+@Controller('employees')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin') // Только admin — полный доступ к управлению сотрудниками
 export class EmployeesController {
     constructor(private readonly employeesService: EmployeesService) { }
 
-    // ── ЗАДАЧА 1: Список с поиском ──────────────────────────────────────────
+    // ── СТАРШИЙ МЕНЕДЖЕР: Управление ────────────────────────────────────────
 
-    @Get('employees')
-    @ApiOperation({
-        summary: 'Список сотрудников (admin)',
-        description: 'Возвращает пользователей с ролями admin/employee. Поиск по username, имени, email, телефону.',
-    })
+    @Get()
+    @Roles('senior_manager')
+    @ApiOperation({ summary: 'Список сотрудников склада (senior_manager)' })
     findAll(@Query('search') search?: string) {
         return this.employeesService.findAll(search);
     }
 
-    // ── ЗАДАЧА 2: Смена статуса ─────────────────────────────────────────────
-
-    @Patch('employees/:id/status')
-    @ApiOperation({ summary: 'Активировать / деактивировать сотрудника (admin)' })
+    @Patch(':id/status')
+    @Roles('senior_manager')
+    @ApiOperation({ summary: 'Активировать / деактивировать сотрудника' })
     updateStatus(
         @Param('id', ParseIntPipe) id: number,
-        @Body() dto: UpdateEmployeeStatusDto,
+        @Body() dto: { status: string },
     ) {
-        return this.employeesService.updateStatus(id, dto);
+        return this.employeesService.updateStatus(id, dto.status);
     }
 
-    // ── ЗАДАЧА 3: Создание и редактирование ─────────────────────────────────
-
-    @Post('employees')
-    @ApiOperation({
-        summary: 'Создать сотрудника (admin)',
-        description: 'Создаёт аккаунт с ролью и полномочиями. Пароль хешируется на сервере.',
-    })
-    create(@Body() dto: CreateEmployeeDto) {
+    @Post()
+    @Roles('senior_manager')
+    @ApiOperation({ summary: 'Создать сборщика или бригадира' })
+    create(@Body() dto: any) {
+        // Здесь можно было бы использовать DTO для строгой валидации
         return this.employeesService.create(dto);
     }
 
-    @Patch('employees/:id')
-    @ApiOperation({
-        summary: 'Обновить данные и права сотрудника (admin)',
-        description: 'responsibilityIds полностью перезаписывает полномочия (delete + create в транзакции).',
-    })
+    @Patch(':id')
+    @Roles('senior_manager')
+    @ApiOperation({ summary: 'Обновить профиль сотрудника (и бригаду)' })
     update(
         @Param('id', ParseIntPipe) id: number,
-        @Body() dto: UpdateEmployeeDto,
+        @Body() dto: any,
     ) {
         return this.employeesService.update(id, dto);
     }
 
-    // ── ЗАДАЧА 4: Список полномочий ─────────────────────────────────────────
+    @Delete(':id')
+    @Roles('senior_manager')
+    @ApiOperation({ summary: 'Физически удалить сотрудника' })
+    remove(@Param('id', ParseIntPipe) id: number) {
+        return this.employeesService.remove(id);
+    }
 
-    @Get('responsibilities')
-    @ApiOperation({
-        summary: 'Все полномочия (admin)',
-        description: 'Справочник для динамической отрисовки тумблеров в модалке редактирования сотрудника.',
-    })
-    findAllResponsibilities() {
-        return this.employeesService.findAllResponsibilities();
+    // ── ПЕРЕРЫВЫ ─────────────────────────────────────────────────────────────
+
+    @Patch('break/request')
+    @Roles('worker', 'foreman')
+    @ApiOperation({ summary: 'Запросить перерыв' })
+    requestBreak(@Request() req: { user: JwtPayload }) {
+        return this.employeesService.requestBreak(req.user.sub);
+    }
+
+    @Patch('break/end')
+    @Roles('worker', 'foreman')
+    @ApiOperation({ summary: 'Завершить перерыв' })
+    endBreak(@Request() req: { user: JwtPayload }) {
+        return this.employeesService.endBreak(req.user.sub);
+    }
+
+    @Patch(':workerId/break/approve')
+    @Roles('foreman')
+    @ApiOperation({ summary: 'Одобрить перерыв сотрудника (бригадир)' })
+    approveBreak(
+        @Request() req: { user: JwtPayload },
+        @Param('workerId', ParseIntPipe) workerId: number,
+    ) {
+        return this.employeesService.approveBreak(workerId, req.user.sub);
     }
 }

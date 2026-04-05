@@ -7,15 +7,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
 import { UpdateStockDto } from './dto/update-stock.dto';
 
-// Поля, которые возвращает складской список (без маркетинговых данных)
+// Поля, которые возвращает складской список
 const INVENTORY_SELECT = {
     id: true,
     sku: true,
     name: true,
+    storageCell: true,
+    department: true,
     stockQuantity: true,
-    minStockLevel: true,
-    costPrice: true,
-    supplier: true,
     isActive: true,
     price: true,
     category: {
@@ -27,7 +26,7 @@ const INVENTORY_SELECT = {
 export class InventoryService {
     constructor(private readonly prisma: PrismaService) { }
 
-    // GET /admin/inventory — все товары для склада (поиск по name/sku)
+    // GET /admin/inventory — все товары для склада
     async findAll(search?: string) {
         const where: any = {};
 
@@ -44,26 +43,22 @@ export class InventoryService {
             orderBy: { name: 'asc' },
         });
 
-        // Добавляем вычисляемое поле isLow
         return products.map((p) => ({
             ...p,
-            isLow: p.stockQuantity <= p.minStockLevel,
+            isLow: p.stockQuantity <= 5, // Хардкодим по умолчанию 5, раз мы убрали minStockLevel
         }));
     }
 
-    // POST /admin/inventory — завести новый товар на склад (черновик)
-    async create(dto: CreateInventoryItemDto) {
+    // POST /admin/inventory — завести новый товар на склад
+    async create(dto: any) {
         return this.prisma.product.create({
             data: {
                 name: dto.name,
                 sku: dto.sku,
                 categoryId: dto.categoryId,
                 stockQuantity: dto.stockQuantity ?? 0,
-                minStockLevel: dto.minStockLevel ?? 5,
                 price: dto.price ?? 0,
-                costPrice: dto.costPrice,
-                supplier: dto.supplier,
-                isActive: false, // всегда черновик — активировать может только admin
+                isActive: false, 
             },
             select: INVENTORY_SELECT,
         });
@@ -88,7 +83,7 @@ export class InventoryService {
             );
         }
 
-        // Атомарная транзакция: обновить остаток + создать лог
+        // Атомарная транзакция
         return this.prisma.$transaction(async (tx) => {
             const updated = await tx.product.update({
                 where: { id: productId },
@@ -107,7 +102,7 @@ export class InventoryService {
 
             return {
                 ...updated,
-                isLow: updated.stockQuantity <= updated.minStockLevel,
+                isLow: updated.stockQuantity <= 5,
                 log: {
                     changeAmount: dto.changeAmount,
                     reason: dto.reason,

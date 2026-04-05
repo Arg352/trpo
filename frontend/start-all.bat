@@ -1,0 +1,9 @@
+@echo off
+echo Запускаем окно Старшего менеджера...
+start npx electron . --user-data-dir=".\.test-profiles\manager"
+
+echo Запускаем окно Бригадира...
+start npx electron . --user-data-dir=".\.test-profiles\brigadier"
+
+echo Запускаем окно Сборщика...
+start npx electron . --user-data-dir=".\.test-profiles\picker"

@@ -58,19 +58,13 @@ export class AuthService {
       roleId: user.roleId,
     };
 
-    // Получаем полномочия: admin → все коды; employee → только назначенные
     const role = await this.prisma.role.findUnique({ where: { id: user.roleId } });
     let permissions: string[] = [];
 
-    if (role?.name === 'admin') {
-      const all = await this.prisma.responsibility.findMany({ select: { code: true } });
-      permissions = all.map((r) => r.code);
+    if (role?.name === 'admin' || role?.name === 'senior_manager') {
+      permissions = ['all'];
     } else {
-      const userResp = await this.prisma.userResponsibility.findMany({
-        where: { userId: user.id },
-        select: { responsibility: { select: { code: true } } },
-      });
-      permissions = userResp.map((ur) => ur.responsibility.code);
+      permissions = role ? [role.name] : [];
     }
 
     return {
@@ -123,7 +117,7 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         phone: dto.phone,
-        publicName: `${dto.firstName} ${dto.lastName}`,
+
         roleId: customerRole.id,
       },
       select: {
@@ -142,47 +136,40 @@ export class AuthService {
     return user;
   }
 
-  // Запрос сброса пароля — генерирует токен и отправляет письмо на email
+  // Запрос восстановления пароля — генерирует временный пароль и отправляет его на email
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
 
-    // Не раскрываем, есть ли такой email в системе (защита от перебора)
+    // Не раскрываем, есть ли такой email в системе
     if (!user) {
-      return { message: 'Если этот email зарегистрирован, письмо с инструкциями отправлено.' };
+      return { message: 'Если этот email зарегистрирован, временный пароль отправлен.' };
     }
 
-    // Генерируем случайный токен (32 байта = 64 символа hex)
-    const rawToken = crypto.randomBytes(32).toString('hex');
+    // Генерируем временный пароль (8 символов)
+    const tempPassword = crypto.randomBytes(4).toString('hex'); // например: a3f1bc92
 
-    // Хешируем токен перед сохранением в БД (защита от утечки данных)
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-    // Срок действия — 1 час
-    const expiry = new Date(Date.now() + 60 * 60 * 1000);
-
+    // Хешируем и сохраняем в БД
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
     await this.prisma.user.update({
       where: { id: user.id },
-      data: {
-        passwordResetToken: tokenHash,
-        passwordResetExpiry: expiry,
-      },
+      data: { passwordHash },
     });
 
-    const resetLink = `http://localhost:3000/reset-password?token=${rawToken}`;
-
-    // Отправляем реальное письмо через SMTP
+    // Отправляем письмо с временным паролем
     await this.mailerService.sendMail({
       to: user.email,
-      subject: 'Сброс пароля в GGG Store',
-      html: this.buildResetPasswordEmail(user.firstName, resetLink),
+      subject: 'Временный пароль — SmartPicker',
+      html: this.buildTempPasswordEmail(user.firstName, tempPassword),
     });
 
-    this.logger.log(`✉️  Письмо для сброса пароля отправлено на ${user.email}`);
+    this.logger.log(`✉️  Временный пароль отправлен на ${user.email}`);
 
-    return { message: 'Если этот email зарегистрирован, письмо с инструкциями отправлено.' };
+    return { message: 'Временный пароль отправлен на ваш email. Войдите и смените пароль.' };
   }
+
+
 
   // Сброс пароля по токену
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
@@ -297,4 +284,53 @@ export class AuthService {
 </body>
 </html>`;
   }
+
+  // HTML-шаблон письма с временным паролем
+  private buildTempPasswordEmail(firstName: string, tempPassword: string): string {
+    return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Временный пароль — SmartPicker</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f7;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+          <tr>
+            <td align="center" style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:32px 40px;">
+              <h1 style="margin:0;font-size:26px;font-weight:800;color:#ffffff;letter-spacing:2px;">SmartPicker</h1>
+              <p style="margin:4px 0 0;font-size:12px;color:rgba(255,255,255,0.7);">WAREHOUSE MANAGEMENT</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:36px 40px;">
+              <h2 style="margin:0 0 12px;font-size:20px;color:#1a1a2e;">Здравствуйте, ${firstName}!</h2>
+              <p style="margin:0 0 20px;font-size:15px;color:#555;line-height:1.6;">
+                Был создан временный пароль для вашей учётной записи в <strong>SmartPicker</strong>.
+              </p>
+              <div style="background:#f0f7ff;border:2px solid #3b82f6;border-radius:10px;padding:20px;text-align:center;margin:24px 0;">
+                <p style="margin:0 0 6px;font-size:13px;color:#64748b;">Ваш временный пароль:</p>
+                <p style="margin:0;font-size:28px;font-weight:800;color:#1e40af;letter-spacing:4px;font-family:monospace;">${tempPassword}</p>
+              </div>
+              <p style="margin:0;font-size:13px;color:#ef4444;line-height:1.5;">
+                ⚠️ Войдите с этим паролем и смените его на собственный в настройках профиля.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#fafafa;border-top:1px solid #eee;padding:16px 40px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#aaa;">© 2025 SmartPicker · Складская система</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+  }
 }
+

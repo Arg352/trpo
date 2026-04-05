@@ -2,15 +2,12 @@ import * as bcrypt from 'bcrypt';
 import {
     BadRequestException,
     ConflictException,
+    ForbiddenException,
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateEmployeeDto } from './dto/create-employee.dto';
-import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { UpdateEmployeeStatusDto } from './dto/update-employee-status.dto';
 
-// Поля, возвращаемые для карточки сотрудника
 const EMPLOYEE_SELECT = {
     id: true,
     username: true,
@@ -18,28 +15,23 @@ const EMPLOYEE_SELECT = {
     lastName: true,
     email: true,
     phone: true,
-    avatarUrl: true,
     status: true,
+    breakStatus: true,
     createdAt: true,
     role: { select: { id: true, name: true, description: true } },
-    responsibilities: {
-        select: {
-            responsibility: {
-                select: { id: true, code: true, name: true },
-            },
-        },
-    },
+    team: { select: { id: true, name: true } },
+    managedTeam: { select: { id: true, name: true } },
 } as const;
 
 @Injectable()
 export class EmployeesService {
     constructor(private readonly prisma: PrismaService) { }
 
-    // ── ЗАДАЧА 1: Список с поиском ────────────────────────────────────────────
+    // ── ЗАДАЧА 1: Управление персоналом (Старший менеджер) ────────────────────
 
     async findAll(search?: string) {
         const where: any = {
-            role: { name: { in: ['admin', 'employee'] } },
+            role: { name: { in: ['worker', 'foreman'] } },
         };
 
         if (search) {
@@ -48,7 +40,6 @@ export class EmployeesService {
                 { firstName: { contains: search } },
                 { lastName: { contains: search } },
                 { email: { contains: search } },
-                { phone: { contains: search } },
             ];
         }
 
@@ -59,21 +50,16 @@ export class EmployeesService {
         });
     }
 
-    // ── ЗАДАЧА 2: Смена статуса ───────────────────────────────────────────────
-
-    async updateStatus(id: number, dto: UpdateEmployeeStatusDto) {
+    async updateStatus(id: number, status: string) {
         await this.assertExists(id);
         return this.prisma.user.update({
             where: { id },
-            data: { status: dto.status },
+            data: { status },
             select: EMPLOYEE_SELECT,
         });
     }
 
-    // ── ЗАДАЧА 3: Создание сотрудника ─────────────────────────────────────────
-
-    async create(dto: CreateEmployeeDto) {
-        // Проверяем уникальность email и username
+    async create(dto: any) {
         const existing = await this.prisma.user.findFirst({
             where: { OR: [{ email: dto.email }, { username: dto.username }] },
         });
@@ -81,12 +67,16 @@ export class EmployeesService {
             throw new ConflictException('Пользователь с таким email или username уже существует');
         }
 
-        // Определяем роль — для admin игнорируем responsibilityIds (суперпользователь)
-        const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
-        const isAdminRole = role?.name === 'admin';
+        // Разрешаем roleId: либо напрямую, либо через roleName
+        let roleId = dto.roleId;
+        if (!roleId && dto.roleName) {
+            const role = await this.prisma.role.findUnique({ where: { name: dto.roleName } });
+            if (!role) throw new BadRequestException(`Роль "${dto.roleName}" не найдена`);
+            roleId = role.id;
+        }
+        if (!roleId) throw new BadRequestException('Укажите roleId или roleName');
 
         const passwordHash = await bcrypt.hash(dto.password, 10);
-        const publicName = `${dto.firstName} ${dto.lastName}`;
 
         return this.prisma.user.create({
             data: {
@@ -96,34 +86,25 @@ export class EmployeesService {
                 firstName: dto.firstName,
                 lastName: dto.lastName,
                 phone: dto.phone,
-                publicName,
-                roleId: dto.roleId,
+                roleId,
                 status: 'active',
-                // Для admin права не нужны — у него всегда полный доступ
-                responsibilities: (!isAdminRole && dto.responsibilityIds?.length)
-                    ? {
-                        create: dto.responsibilityIds.map((responsibilityId) => ({ responsibilityId })),
-                    }
-                    : undefined,
+                breakStatus: 'working',
+                teamId: dto.teamId || null,
             },
             select: EMPLOYEE_SELECT,
         });
     }
 
-    // ── ЗАДАЧА 3: Обновление сотрудника ──────────────────────────────────────
 
-    async update(id: number, dto: UpdateEmployeeDto) {
+    async update(id: number, dto: any) {
         const target = await this.prisma.user.findUnique({
             where: { id },
             include: { role: { select: { name: true } } },
         });
         if (!target) throw new NotFoundException(`Сотрудник #${id} не найден`);
 
-        // Блокируем попытку изменить права администратору
-        if (target.role.name === 'admin' && dto.responsibilityIds !== undefined) {
-            throw new BadRequestException(
-                'Нельзя изменить права администратора — у него всегда полный доступ по умолчанию',
-            );
+        if (target.role.name === 'senior_manager') {
+            throw new BadRequestException('Нельзя изменить права старшего менеджера через этот эндпоинт');
         }
 
         const data: any = {};
@@ -132,46 +113,85 @@ export class EmployeesService {
         if (dto.email !== undefined) data.email = dto.email;
         if (dto.phone !== undefined) data.phone = dto.phone;
         if (dto.roleId !== undefined) data.roleId = dto.roleId;
-        if (dto.password !== undefined) {
+        if (dto.teamId !== undefined) data.teamId = dto.teamId;
+        if (dto.password !== undefined && dto.password.length > 0) {
             data.passwordHash = await bcrypt.hash(dto.password, 10);
         }
-        // Пересчитываем publicName если изменились имя/фамилия
-        if (dto.firstName || dto.lastName) {
-            const current = await this.prisma.user.findUnique({
-                where: { id },
-                select: { firstName: true, lastName: true },
-            });
-            data.publicName = `${dto.firstName ?? current!.firstName} ${dto.lastName ?? current!.lastName}`;
-        }
 
-        return this.prisma.$transaction(async (tx) => {
-            // Если переданы responsibilityIds — полностью перезаписываем
-            if (dto.responsibilityIds !== undefined) {
-                await tx.userResponsibility.deleteMany({ where: { userId: id } });
-
-                if (dto.responsibilityIds.length > 0) {
-                    await tx.userResponsibility.createMany({
-                        data: dto.responsibilityIds.map((responsibilityId) => ({
-                            userId: id,
-                            responsibilityId,
-                        })),
-                    });
-                }
-            }
-
-            return tx.user.update({
-                where: { id },
-                data,
-                select: EMPLOYEE_SELECT,
-            });
+        return this.prisma.user.update({
+            where: { id },
+            data,
+            select: EMPLOYEE_SELECT,
         });
     }
 
-    // ── ЗАДАЧА 4: Список всех полномочий ──────────────────────────────────────
+    async remove(id: number) {
+        await this.assertExists(id);
 
-    async findAllResponsibilities() {
-        return this.prisma.responsibility.findMany({
-            orderBy: { id: 'asc' },
+        const target = await this.prisma.user.findUnique({
+            where: { id },
+            include: { role: { select: { name: true } } },
+        });
+
+        if (target?.role.name === 'senior_manager') {
+            throw new BadRequestException('Нельзя удалить старшего менеджера через этот эндпоинт');
+        }
+
+        await this.prisma.user.delete({ where: { id } });
+        return { message: 'Сотрудник удален' };
+    }
+
+    // ── БРИГАДЫ И ПЕРЕРЫВЫ ───────────────────────────────────────────────────
+
+    async requestBreak(workerId: number) {
+        return this.prisma.user.update({
+            where: { id: workerId },
+            data: { breakStatus: 'break_requested' },
+            select: EMPLOYEE_SELECT,
+        });
+    }
+
+    async approveBreak(workerId: number, foremanId: number) {
+        // Проверка что foreman действительно бригадир этого рабочего
+        const worker = await this.prisma.user.findUnique({
+            where: { id: workerId },
+            include: { team: true },
+        });
+
+        if (!worker) throw new NotFoundException('Сборщик не найден');
+        if (worker.team?.foremanId !== foremanId) {
+            throw new ForbiddenException('Вы не можете подтвердить перерыв сотруднику из другой бригады');
+        }
+
+        const activeOrdersCount = await this.prisma.order.count({
+            where: {
+                assignedWorkerId: workerId,
+                status: { in: ['processing', 'in_progress'] },
+            },
+        });
+
+        // Если у сотрудника нет активных заказов, он уходит на перерыв мгновенно. 
+        // Иначе он доделывает текущие и уходит (статус break_approved)
+        const finalStatus = activeOrdersCount === 0 ? 'on_break' : 'break_approved';
+
+        return this.prisma.user.update({
+            where: { id: workerId },
+            data: { 
+                breakStatus: finalStatus,
+                breakApprovedById: finalStatus === 'break_approved' ? foremanId : null
+            },
+            select: EMPLOYEE_SELECT,
+        });
+    }
+
+    async endBreak(workerId: number) {
+        return this.prisma.user.update({
+            where: { id: workerId },
+            data: { 
+                breakStatus: 'working',
+                breakApprovedById: null
+            },
+            select: EMPLOYEE_SELECT,
         });
     }
 
