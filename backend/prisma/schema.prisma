@@ -1,0 +1,364 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// --------------------------------------------------------
+// 1. ПОЛЬЗОВАТЕЛИ И РОЛИ
+// --------------------------------------------------------
+
+model Role {
+  id          Int     @id @default(autoincrement()) @map("role_id")
+  name        String  @unique
+  description String?
+  users       User[]
+
+  @@map("roles") // Таблица в БД называется roles
+}
+
+model Team {
+  id        Int    @id @default(autoincrement()) @map("team_id")
+  name      String @unique
+  foremanId Int    @unique @map("foreman_id")
+
+  foreman User    @relation("TeamForeman", fields: [foremanId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  workers User[]  @relation("TeamMembers")
+  orders  Order[] @relation("TeamOrders")
+
+  @@map("teams")
+}
+
+model Responsibility {
+  id                   Int                  @id @default(autoincrement()) @map("responsibility_id")
+  code                 String               @unique
+  name                 String
+  userResponsibilities UserResponsibility[]
+
+  @@map("responsibilities")
+}
+
+model User {
+  id                   Int       @id @default(autoincrement()) @map("user_id")
+  roleId               Int       @map("role_id")
+  email                String    @unique
+  username             String    @unique
+  passwordHash         String    @map("password_hash")
+  firstName            String    @map("first_name")
+  lastName             String    @map("last_name")
+  phone                String?
+  avatarUrl            String?   @map("avatar_url")
+  status               String    @default("active")
+  mobilePushToken      String?   @map("mobile_push_token")
+  notificationsEnabled Boolean?  @default(true) @map("notifications_enabled")
+  publicName           String?   @map("public_name")
+  passwordResetToken   String?   @map("password_reset_token")
+  passwordResetExpiry  DateTime? @map("password_reset_expiry")
+  createdAt            DateTime? @default(now()) @map("created_at")
+  teamId               Int?      @map("team_id")
+
+  role             Role                 @relation(fields: [roleId], references: [id])
+  team             Team?                @relation("TeamMembers", fields: [teamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  managedTeam      Team?                @relation("TeamForeman")
+  savedAddresses   SavedAddress[]
+  savedCards       SavedCard[]
+  orders           Order[]
+  workerOrders     Order[]              @relation("OrderWorker")
+  reviews          Review[]
+  chatMessages     ChatMessage[]        @relation("Sender")
+  receivedMessages ChatMessage[]        @relation("Receiver")
+  responsibilities UserResponsibility[]
+  favorites        Favorite[]
+  inventoryLogs    InventoryLog[]
+
+  @@map("users")
+}
+
+model UserResponsibility {
+  userId           Int @map("user_id")
+  responsibilityId Int @map("responsibility_id")
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  responsibility Responsibility @relation(fields: [responsibilityId], references: [id], onDelete: Cascade)
+
+  @@id([userId, responsibilityId])
+  @@map("user_responsibilities")
+}
+
+model SavedAddress {
+  id          Int      @id @default(autoincrement()) @map("address_id")
+  userId      Int      @map("user_id")
+  city        String
+  addressText String   @map("address_text")
+  isDefault   Boolean? @default(false) @map("is_default")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_addresses")
+}
+
+model SavedCard {
+  id           Int       @id @default(autoincrement()) @map("card_id")
+  userId       Int       @map("user_id")
+  brand        String // Visa, Mastercard
+  last4Digits  String    @map("last_4_digits")
+  cardHolder   String?   @map("card_holder_name")
+  paymentToken String?   @map("payment_token")
+  isDefault    Boolean?  @default(false) @map("is_default")
+  createdAt    DateTime? @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_cards")
+}
+
+// --------------------------------------------------------
+// 2. ТОВАРЫ (EAV МОДЕЛЬ)
+// --------------------------------------------------------
+
+model Category {
+  id         Int                 @id @default(autoincrement()) @map("category_id")
+  name       String              @unique
+  slug       String              @unique
+  imageUrl   String              @default("https://placehold.co/400") @map("image_url")
+  products   Product[]
+  attributes CategoryAttribute[]
+
+  @@map("categories")
+}
+
+model Attribute {
+  id            Int                     @id @default(autoincrement()) @map("attribute_id")
+  name          String
+  unit          String?
+  categoryLinks CategoryAttribute[]
+  productValues ProductAttributeValue[]
+
+  @@map("attributes")
+}
+
+model CategoryAttribute {
+  categoryId  Int @map("category_id")
+  attributeId Int @map("attribute_id")
+
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@id([categoryId, attributeId])
+  @@map("category_attributes")
+}
+
+model Product {
+  id            Int      @id @default(autoincrement()) @map("product_id")
+  categoryId    Int      @map("category_id")
+  name          String
+  description   String?
+  price         Decimal  @default(0) @db.Decimal(10, 2)
+  oldPrice      Decimal? @map("old_price") @db.Decimal(10, 2)
+  costPrice     Decimal? @map("cost_price") @db.Decimal(10, 2) // закупочная цена (видна employee)
+  stockQuantity Int      @default(0) @map("stock_quantity")
+  minStockLevel Int      @default(5) @map("min_stock_level") // порог «Низких остатков»
+  supplier      String? // поставщик
+  imageUrl      String?  @map("image_url")
+  sku           String?  @unique
+  storageCell   String?  @map("storage_cell") // Ячейка на складе
+  department    String?  @map("department")   // Отдел (напр. "Холодный склад")
+  isActive      Boolean? @default(true) @map("is_active")
+  averageRating Float    @default(0) @map("average_rating") // кэш для каталога
+  reviewCount   Int      @default(0) @map("review_count") // кэш для каталога
+
+  category        Category                @relation(fields: [categoryId], references: [id])
+  attributeValues ProductAttributeValue[]
+  inventoryLogs   InventoryLog[]
+  orderItems      OrderItem[]
+  reviews         Review[]
+  images          ProductImage[]
+  favoritedBy     Favorite[]
+
+  @@map("products")
+}
+
+model ProductImage {
+  id        Int     @id @default(autoincrement()) @map("image_id")
+  productId Int     @map("product_id")
+  url       String
+  isMain    Boolean @default(false) @map("is_main")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_images")
+}
+
+model ProductAttributeValue {
+  productId   Int    @map("product_id")
+  attributeId Int    @map("attribute_id")
+  value       String
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@id([productId, attributeId])
+  @@map("product_attribute_values")
+}
+
+// --------------------------------------------------------
+// 3. ОПЕРАЦИИ (ЗАКАЗЫ, СКЛАД)
+// --------------------------------------------------------
+
+model InventoryLog {
+  id           Int       @id @default(autoincrement()) @map("log_id")
+  productId    Int       @map("product_id")
+  userId       Int?      @map("user_id") // аудит: кто изменил остаток
+  changeAmount Int       @map("change_amount")
+  reason       String
+  createdAt    DateTime? @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("inventory_log")
+}
+
+model Order {
+  id               Int       @id @default(autoincrement()) @map("order_id")
+  userId           Int       @map("user_id")
+  deliveryType     String    @map("delivery_type")
+  deliveryAddress  String?   @map("delivery_address")
+  deliveryDateFrom DateTime? @map("delivery_date_from") // диапазон доставки
+  deliveryDateTo   DateTime? @map("delivery_date_to")
+  deliveryTimeSlot String?   @map("delivery_time_slot") // напр. "13:00 - 16:00"
+  status           String?   @default("cart")
+  totalAmount      Decimal   @default(0) @map("total_amount") @db.Decimal(12, 2)
+  pickupCode       String?   @map("pickup_code")
+  paymentOnDelivery String?  @map("payment_on_delivery") // 'cash'|'card'|'sbp'|null (null=оплачен онлайн)
+  createdAt        DateTime? @default(now()) @map("created_at")
+  assignedTeamId   Int?      @map("assigned_team_id")
+  assignedWorkerId Int?      @map("assigned_worker_id")
+  workerQueueStatus String?  @map("worker_queue_status") // 'active' или 'queued' или 'picked'
+
+  user           User        @relation(fields: [userId], references: [id])
+  assignedTeam   Team?       @relation("TeamOrders", fields: [assignedTeamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignedWorker User?       @relation("OrderWorker", fields: [assignedWorkerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items          OrderItem[]
+  payments       Payment[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id            Int     @id @default(autoincrement()) @map("item_id")
+  orderId       Int     @map("order_id")
+  productId     Int     @map("product_id")
+  quantity      Int
+  priceAtMoment Decimal @map("price_at_moment") @db.Decimal(10, 2)
+  isPacked      Boolean @default(false)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model Payment {
+  id              Int       @id @default(autoincrement()) @map("payment_id")
+  orderId         Int       @map("order_id")
+  transactionUuid String?   @map("transaction_uuid")
+  paymentMethod   String    @map("payment_method")
+  amount          Decimal   @db.Decimal(12, 2)
+  status          String    @default("success")
+  paymentDate     DateTime? @default(now()) @map("payment_date")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("payments")
+}
+
+// --------------------------------------------------------
+// 4. КОММУНИКАЦИИ
+// --------------------------------------------------------
+
+model Review {
+  id        Int       @id @default(autoincrement()) @map("review_id")
+  productId Int       @map("product_id")
+  userId    Int       @map("user_id")
+  rating    Int
+  pros      String? // Плюсы
+  cons      String? // Минусы
+  createdAt DateTime? @default(now()) @map("created_at")
+
+  product Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id])
+  media   ReviewMedia[]
+
+  @@map("reviews")
+}
+
+model ReviewMedia {
+  id       Int    @id @default(autoincrement()) @map("media_id")
+  reviewId Int    @map("review_id")
+  url      String
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("review_media")
+}
+
+model ChatMessage {
+  id             Int       @id @default(autoincrement()) @map("message_id")
+  userId         Int       @map("user_id")
+  chatWithUserId Int       @map("chat_with_user_id")
+  text           String
+  isRead         Boolean?  @default(false) @map("is_read")
+  createdAt      DateTime? @default(now()) @map("created_at")
+
+  // ДОБАВИЛИ: onUpdate: NoAction, onDelete: NoAction
+  user         User @relation("Sender", fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  chatWithUser User @relation("Receiver", fields: [chatWithUserId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@map("chat_messages")
+}
+
+model Favorite {
+  id        Int      @id @default(autoincrement()) @map("favorite_id")
+  userId    Int      @map("user_id")
+  productId Int      @map("product_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("favorites")
+}
+
+model PromoBanner {
+  id        Int      @id @default(autoincrement()) @map("banner_id")
+  title     String
+  subtitle  String?
+  discount  String?
+  imageUrl  String   @map("image_url")
+  targetUrl String?  @map("target_url")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("promo_banners")
+}
+
+// --------------------------------------------------------
+// 8. НАСТРОЙКИ СИСТЕМЫ (Key-Value хранилище)
+// --------------------------------------------------------
+
+model SystemSetting {
+  id        Int      @id @default(autoincrement()) @map("setting_id")
+  category  String   // 'security' | 'delivery' | 'integrations' | 'payments'
+  key       String   // напр. 'sdekEnabled', 'stripeApiKey', 'sessionTimeoutMinutes'
+  value     String   // все значения как строка: "true", "false", "30", "sk_live_..."
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([category, key]) // обновляем upsert по этому составному ключу
+  @@map("system_settings")
+}

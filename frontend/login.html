@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход в систему</title>
+    <link rel="stylesheet" href="css/login.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="login-container">
+        <div class="logo-wrapper">
+            <img src="logo.png" alt="GGG Logo" id="logo-img">
+        </div>
+
+        <div class="form-wrapper">
+            <h2 class="form-title">Вход в аккаунт</h2>
+
+            <form id="login-form" class="login-form">
+                <div class="input-group">
+                    <input type="text" id="email-input" placeholder="Логин" required autocomplete="username">
+                </div>
+
+                <div class="input-group password-group">
+                    <input type="password" id="password-input" placeholder="Пароль" required
+                        autocomplete="current-password">
+                    <button type="button" class="toggle-password" id="toggle-password" aria-label="Показать пароль">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+
+                <div id="error-message" class="error-message" style="display: none;"></div>
+
+                <button type="submit" class="submit-btn">Войти</button>
+
+                <div class="forgot-password-wrapper">
+                    <a href="#" class="forgot-password-link">Забыли пароль?</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/login.js"></script>
+
+    <script>
+        document.getElementById('toggle-password').addEventListener('click', function () {
+            const passwordInput = document.getElementById('password-input');
+            const isPassword = passwordInput.getAttribute('type') === 'password';
+            passwordInput.setAttribute('type', isPassword ? 'text' : 'password');
+            this.style.color = isPassword ? '#10218F' : '#9CA3AF';
+        });
+    </script>
+</body>
+
+</html>

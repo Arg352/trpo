@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GGG Панель управления</title>
+    <!-- Подключаем шрифты, например Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/index.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    
+    <!-- Боковая панель (Сайдбар) -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1 class="logo">GGG</h1>
+            <p class="logo-subtitle">Панель управления</p>
+        </div>
+
+        <div class="user-profile" id="user-profile">
+            <div class="avatar" id="user-avatar">?</div>
+            <div class="user-info">
+                <div class="user-name" id="user-name">Загрузка...</div>
+                <div class="user-role" id="user-role-name">Загрузка...</div>
+            </div>
+        </div>
+
+        <nav class="sidebar-menu" id="sidebar-menu">
+            <!-- Сюда динамически добавляются пункты меню через JS -->
+        </nav>
+
+        <div class="sidebar-footer">
+            <button class="logout-btn" id="logout-btn">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                Выйти
+            </button>
+        </div>
+    </aside>
+
+    <!-- Основной контент -->
+    <main class="main-content">
+        <header class="content-header" id="content-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h2 id="page-title">Управление заказами</h2>
+                <p id="page-subtitle">Просмотр и обработка заказов клиентов</p>
+            </div>
+            <div id="header-actions"></div>
+        </header>
+        
+        <section class="content-area" id="content-area">
+            <!-- Здесь будет рендериться контент вкладок (пока пусто, как просил пользователь) -->
+        </section>
+    </main>
+
+    <script src="js/index.js"></script>
+</body>
+</html>
