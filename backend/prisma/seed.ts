@@ -24,7 +24,10 @@ async function main() {
         in: [
           'manager',
           'foreman', 'foreman2', 'foreman3',
+<<<<<<< HEAD
           'worker',
+=======
+>>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
           'worker_a1', 'worker_a2', 'worker_a3',
           'worker_b1', 'worker_b2', 'worker_b3',
           'worker_c1', 'worker_c2', 'worker_c3',
@@ -89,8 +92,11 @@ async function main() {
     },
   });
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
   // 3. ДОПОЛНИТЕЛЬНЫЕ БРИГАДИРЫ
   const foreman2 = await prisma.user.create({
     data: { email: 'foreman2@tech.com', username: 'foreman2', passwordHash: foremanHash, firstName: 'Михаил', lastName: 'Иванов', roleId: foremanRole.id, status: 'inactive', breakStatus: 'working' },
@@ -104,6 +110,7 @@ async function main() {
   const teamBeta = await prisma.team.create({ data: { name: 'Бригада Бета (Бытовая техника)', foremanId: foreman2.id } });
   const teamGamma = await prisma.team.create({ data: { name: 'Бригада Гамма (Аксессуары)', foremanId: foreman3.id } });
 
+<<<<<<< HEAD
   // Создаем основного рабочего в Альфа-команде
   const worker = await prisma.user.create({
     data: {
@@ -119,6 +126,8 @@ async function main() {
     },
   });
 
+=======
+>>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
   // 5. ДОПОЛНИТЕЛЬНЫЕ СОТРУДНИКИ (по 3 человека в команде)
   const cw = async (email, username, first, last, teamId) =>
     prisma.user.create({

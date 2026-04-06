@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Dependencies
 **/node_modules/
 package-lock.json
@@ -20,6 +21,19 @@ out/
 .env
 .env.local
 .env.*
+=======
+# Common dependencies
+node_modules/
+
+# Backend Build
+backend/dist/
+backend/build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+>>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
 backend/.env
 
 # Prisma
@@ -28,6 +42,7 @@ backend/prisma/*.db
 backend/prisma/*.db-journal
 
 # Logs
+<<<<<<< HEAD
 logs/
 *.log
 npm-debug.log*
@@ -41,6 +56,42 @@ desktop.ini
 # Temporary files
 /tmp/
 /temp/
+=======
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IDE - IntelliJ
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Temporary files
+.tmp/
+.temp/
+>>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
 *.pid
 *.seed
 *.pid.lock
