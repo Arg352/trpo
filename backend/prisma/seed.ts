@@ -1,7 +1,5 @@
 /**
- * prisma/seed.ts
- * Сбрасывает и заполняет базу начальными данными для SmartPicker.
- * Запуск: npx prisma db seed  или автоматически при старте сервера
+ * Скрипт инициализации базы данных SmartPicker.
  */
 
 import { PrismaClient } from '@prisma/client';
@@ -10,24 +8,20 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Начинаем сидирование (полный сброс)...');
+  console.log('🌱 Запуск сидирования (полный сброс)...');
 
-  // ─── ОЧИСТКА ДАННЫХ (в порядке зависимостей) ──────────────────
+  // --- ОЧИСТКА ДАННЫХ ---
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
-  await prisma.user.updateMany({ data: { teamId: null } });
+  await prisma.user.updateMany({ data: { teamId: null, breakApprovedById: null } });
   await prisma.team.deleteMany();
-  // Удаляем всех сид-пользователей по username (не зависит от изменений email)
   await prisma.user.deleteMany({
     where: {
       username: {
         in: [
           'manager',
           'foreman', 'foreman2', 'foreman3',
-<<<<<<< HEAD
           'worker',
-=======
->>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
           'worker_a1', 'worker_a2', 'worker_a3',
           'worker_b1', 'worker_b2', 'worker_b3',
           'worker_c1', 'worker_c2', 'worker_c3',
@@ -36,7 +30,6 @@ async function main() {
     },
   });
 
-
   console.log('🧹 Старые данные очищены.');
 
   // 1. РОЛИ
@@ -44,21 +37,19 @@ async function main() {
     prisma.role.upsert({
       where: { name: 'senior_manager' },
       update: {},
-      create: { name: 'senior_manager', description: 'Старший менеджер (распределяет на бригады)' },
+      create: { name: 'senior_manager', description: 'Старший менеджер (распределение заказов)' },
     }),
     prisma.role.upsert({
       where: { name: 'foreman' },
       update: {},
-      create: { name: 'foreman', description: 'Бригадир (распределяет по работникам)' },
+      create: { name: 'foreman', description: 'Бригадир (управление бригадой)' },
     }),
     prisma.role.upsert({
       where: { name: 'worker' },
       update: {},
-      create: { name: 'worker', description: 'Сборщик (выполняет заказы)' },
+      create: { name: 'worker', description: 'Сборщик (исполнение заказов)' },
     }),
   ]);
-
-  console.log(`✅ Роли созданы.`);
 
   // 2. ПОЛЬЗОВАТЕЛИ
   const managerHash = await bcrypt.hash('manager123', 10);
@@ -74,7 +65,6 @@ async function main() {
       lastName: 'Менеджер',
       roleId: seniorManagerRole.id,
       status: 'inactive',
-
       breakStatus: 'working',
     },
   });
@@ -92,11 +82,6 @@ async function main() {
     },
   });
 
-<<<<<<< HEAD
-
-
-=======
->>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
   // 3. ДОПОЛНИТЕЛЬНЫЕ БРИГАДИРЫ
   const foreman2 = await prisma.user.create({
     data: { email: 'foreman2@tech.com', username: 'foreman2', passwordHash: foremanHash, firstName: 'Михаил', lastName: 'Иванов', roleId: foremanRole.id, status: 'inactive', breakStatus: 'working' },
@@ -110,30 +95,13 @@ async function main() {
   const teamBeta = await prisma.team.create({ data: { name: 'Бригада Бета (Бытовая техника)', foremanId: foreman2.id } });
   const teamGamma = await prisma.team.create({ data: { name: 'Бригада Гамма (Аксессуары)', foremanId: foreman3.id } });
 
-<<<<<<< HEAD
-  // Создаем основного рабочего в Альфа-команде
-  const worker = await prisma.user.create({
-    data: {
-      email: 'worker@tech.com',
-      username: 'worker',
-      passwordHash: workerHash,
-      firstName: 'Евлампий',
-      lastName: 'Работяга',
-      roleId: workerRole.id,
-      teamId: teamAlpha.id,
-      status: 'inactive',
-      breakStatus: 'working',
-    },
-  });
-
-=======
->>>>>>> 92b8ecb73daa574f12f00fc47cdcb39086429455
-  // 5. ДОПОЛНИТЕЛЬНЫЕ СОТРУДНИКИ (по 3 человека в команде)
+  // 5. СОТРУДНИКИ
   const cw = async (email, username, first, last, teamId) =>
     prisma.user.create({
       data: { email, username, passwordHash: workerHash, firstName: first, lastName: last, roleId: workerRole.id, teamId, status: 'inactive', breakStatus: 'working' },
     });
 
+  await cw('worker@tech.com', 'worker', 'Евлампий', 'Работяга', teamAlpha.id);
   await cw('worker_a1@tech.com', 'worker_a1', 'Алексей', 'Сборщик', teamAlpha.id);
   await cw('worker_a2@tech.com', 'worker_a2', 'Сергей', 'Сборщик', teamAlpha.id);
   await cw('worker_a3@tech.com', 'worker_a3', 'Виталий', 'Сборщик', teamAlpha.id);
@@ -146,9 +114,7 @@ async function main() {
   await cw('worker_c2@tech.com', 'worker_c2', 'Олег', 'Кузнецов', teamGamma.id);
   await cw('worker_c3@tech.com', 'worker_c3', 'Григорий', 'Васильев', teamGamma.id);
 
-  console.log(`✅ Пользователи и 3 бригады по 3 человека (и 1 бригадир) созданы.`);
-
-  // 6. ТОВАРЫ (С ячейками хранения)
+  // 6. ТОВАРЫ
   const catElec = await prisma.category.upsert({ where: { slug: 'electronics' }, update: {}, create: { name: 'Электроника', slug: 'electronics' } });
   const catAccess = await prisma.category.upsert({ where: { slug: 'accessories' }, update: {}, create: { name: 'Аксессуары', slug: 'accessories' } });
 
@@ -174,9 +140,7 @@ async function main() {
     });
   }
 
-  console.log(`✅ Товары загружены.`);
-
-  // 7. ЗАКАЗЫ — 14 штук разных статусов и составов
+  // 7. ЗАКАЗЫ (14 шт.)
   const mkOrder = (total, status, items, assignedTeamId?) =>
     prisma.order.create({
       data: {
@@ -186,23 +150,18 @@ async function main() {
       },
     });
 
-
-  // Новые (не назначенные)
+  // Новые
   await mkOrder(110900, 'new', [['LAP-MAC-M2', 1], ['CBL-USB-C', 1]]);
   await mkOrder(108000, 'new', [['PHN-IP14-128', 1], ['ACC-AIRP-PRO2', 1]]);
   await mkOrder(55900, 'new', [['CON-PS5-DS5', 1], ['ACC-LOGI-MX', 1]]);
   await mkOrder(52700, 'new', [['WTC-APP-S8', 1], ['ACC-AIRP-PRO2', 1], ['CBL-USB-C', 1]]);
   await mkOrder(42000, 'new', [['MON-DELL-U27', 1]]);
 
-  // Назначены на бригаду Альфа — в работе
+  // В работе
   await mkOrder(85000, 'in_progress', [['PHN-IP14-128', 1]], teamAlpha.id);
   await mkOrder(51800, 'in_progress', [['WTC-APP-S8', 1], ['ACC-LOGI-MX', 1], ['KBD-APPLE-MAGIC', 1]], teamAlpha.id);
-
-  // Назначены на бригаду Бета — в работе
   await mkOrder(55000, 'in_progress', [['CON-PS5-DS5', 1]], teamBeta.id);
   await mkOrder(24900, 'in_progress', [['HDD-WD-4TB', 1], ['CBL-USB-C', 3], ['ACC-LOGI-MX', 1]], teamBeta.id);
-
-  // Назначены на бригаду Гамма
   await mkOrder(27300, 'in_progress', [['KBD-APPLE-MAGIC', 1], ['ACC-AIRP-PRO2', 1]], teamGamma.id);
 
   // Завершённые
@@ -211,7 +170,6 @@ async function main() {
   await mkOrder(96000, 'delivered', [['PHN-IP14-128', 1], ['WTC-APP-S8', 1]], teamGamma.id);
   await mkOrder(42900, 'delivered', [['MON-DELL-U27', 1], ['CBL-USB-C', 1]], teamAlpha.id);
 
-  console.log(`✅ 14 реалистичных заказов созданы.`);
   console.log('🎉 Сидирование завершено!');
 }
 

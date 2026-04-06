@@ -37,9 +37,7 @@ const ADMIN_ORDER_INCLUDE = {
 export class OrdersService {
     constructor(private readonly prisma: PrismaService) { }
 
-    // ─── СТАРШИЙ МЕНЕДЖЕР ─────────────────────────────────────────────
-
-    // Все заказы для старшего менеджера (все статусы)
+    // --- СТАРШИЙ МЕНЕДЖЕР ---
     async getManagerOrders() {
         const orders = await this.prisma.order.findMany({
             include: {
@@ -66,15 +64,13 @@ export class OrdersService {
             
             if (pa !== pb) return pa - pb;
             
-            // Если приоритет одинаковый, оставляем сортировку по дате (desc)
             const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
             return dateB - dateA;
         });
     }
 
-
-    // Список бригад
+    // Список доступных бригад
     async getTeams() {
         return this.prisma.team.findMany({
             select: {
@@ -86,7 +82,7 @@ export class OrdersService {
         });
     }
 
-    // Назначить бригаду на заказ
+    // Назначить заказ на бригаду
     async assignTeam(orderId: number, teamId: number) {
         const order = await this.prisma.order.findUnique({ where: { id: orderId } });
         if (!order) throw new NotFoundException(`Заказ #${orderId} не найден`);
@@ -125,9 +121,7 @@ export class OrdersService {
         });
     }
 
-    // ─── БРИГАДИР ─────────────────────────────────────────────────────
-
-    // Заказы бригады бригадира
+    // --- БРИГАДИР ---
     async getForemanOrders(foremanUserId: number) {
         const team = await this.prisma.team.findFirst({
             where: { foremanId: foremanUserId },
@@ -157,7 +151,7 @@ export class OrdersService {
         });
     }
 
-    // Список сотрудников бригады
+    // Список сотрудников текущей бригады
     async getTeamMembers(foremanUserId: number) {
         const team = await this.prisma.team.findFirst({
             where: { foremanId: foremanUserId },
@@ -212,7 +206,7 @@ export class OrdersService {
         const order = await this.prisma.order.findUnique({ where: { id: orderId } });
         if (!order) throw new NotFoundException(`Заказ #${orderId} не найден`);
         if (order.assignedTeamId !== team.id) {
-            throw new ForbiddenException('Этот заказ не принадлежит вашей бригаде');
+            throw new ForbiddenException('Заказ не принадлежит вашей бригаде');
         }
 
         const worker = await this.prisma.user.findFirst({
@@ -247,7 +241,7 @@ export class OrdersService {
         });
     }
 
-    // Снять работника с заказа
+    // Снять сотрудника с заказа
     async unassignWorker(orderId: number) {
         return this.prisma.$transaction(async (tx) => {
             await tx.orderItem.updateMany({
@@ -284,9 +278,7 @@ export class OrdersService {
         });
     }
 
-    // ─── СБОРЩИК ──────────────────────────────────────────────────────
-
-    // Заказы конкретного сотрудника
+    // --- СБОРЩИК ---
     async getWorkerOrders(workerId: number) {
         return this.prisma.order.findMany({
             where: {
@@ -305,7 +297,7 @@ export class OrdersService {
 
         const data: any = { isPacked: dto.packed };
         if (dto.packed && !item.isPacked) {
-            data.packedAt = new Date(); // Упаковано только что
+            data.packedAt = new Date();
         } else if (!dto.packed) {
             data.packedAt = null;
         }
@@ -353,7 +345,7 @@ export class OrdersService {
         const worker = await this.prisma.user.findUnique({ where: { id: workerId } });
 
         if (worker && worker.breakStatus === 'break_approved') {
-            // Уходит на перерыв: отвязываем остальные в очереди
+            // Уход на перерыв: отвязываем заказы в очереди
             const queuedOrders = await this.prisma.order.findMany({
                 where: { assignedWorkerId: workerId, workerQueueStatus: 'queued' }
             });
@@ -391,8 +383,7 @@ export class OrdersService {
         return result;
     }
 
-    // ─── АНАЛИТИКА / KPI ──────────────────────────────────────────────
-
+    // --- АНАЛИТИКА / KPI ---
     async getKPIs() {
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());

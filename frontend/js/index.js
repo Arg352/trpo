@@ -1,23 +1,19 @@
 document.addEventListener('DOMContentLoaded', async () => {
     const token = localStorage.getItem('adminToken');
 
-    // Если токена нет, отправляем на страницу логина
+    // Редирект на логин при отсутствии токена
     if (!token) {
         window.location.href = 'login.html';
         return;
     }
 
     try {
-        // Получаем данные текущего пользователя
+        // Загрузка профиля пользователя
         const response = await fetch('http://localhost:5000/users/me', {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
 
-        if (!response.ok) {
-            throw new Error('Токен недействителен или истек');
-        }
+        if (!response.ok) throw new Error('Токен недействителен');
 
         const user = await response.json();
         const roleName = user.role ? user.role.name : 'worker';
@@ -45,17 +41,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function renderUserProfile(user, roleNameStr) {
-    window.currentUser = user; // Сохраняем глобально
+    window.currentUser = user;
     const firstName = user.firstName || 'Пользователь';
     const lastName = user.lastName || '';
     const fullName = `${firstName} ${lastName}`.trim();
 
     document.getElementById('user-name').textContent = fullName;
-
-    // Первая буква имени для аватара
     document.getElementById('user-avatar').textContent = firstName.charAt(0).toUpperCase();
 
-    // Новые роли микроменеджмента
+    // Маппинг ролей для интерфейса
     const roleNameMap = {
         'senior_manager': 'Старший менеджер',
         'foreman': 'Бригадир',
@@ -78,9 +72,8 @@ const ALL_TABS = [
 
 function renderSidebarMenu(userRoleName) {
     const menuContainer = document.getElementById('sidebar-menu');
-    menuContainer.innerHTML = ''; // Очищаем
+    menuContainer.innerHTML = '';
 
-    // Фильтруем вкладки по роли
     const availableTabs = ALL_TABS.filter(tab => tab.roles.includes(userRoleName));
 
     if (availableTabs.length === 0) {
@@ -93,7 +86,7 @@ function renderSidebarMenu(userRoleName) {
         const item = document.createElement('a');
         item.className = 'menu-item';
 
-        // По дефолту делаем первую доступную вкладку активной
+        // Активация первой доступной вкладки
         if (index === 0) {
             item.classList.add('active');
             updateHeader(tab.title, tab.subtitle);
@@ -123,12 +116,11 @@ function updateHeader(title, subtitle, actionsHtml = '') {
     }
 }
 
-// Функция для отрисовки содержимого конкретной вкладки (заглушки для новых экранов микроменеджмента)
+// Отрисовка контента конкретной вкладки
 function renderTabContent(tabId) {
     const contentArea = document.getElementById('content-area');
-    contentArea.innerHTML = ''; // Очищаем предыдущий контент
+    contentArea.innerHTML = ''; 
 
-    // Стили для карточек
     const stubStyle = "padding: 40px; text-align: center; background: #fff; border-radius: 8px; border: 1px dashed #ccc; margin: 20px;";
 
     if (tabId === 'orders_manager') {
@@ -153,13 +145,13 @@ function renderTabContent(tabId) {
     }
 }
 
-// Вспомогательные функции для статусов
+// Статусы заказов
 const statusMap = {
-    'new': { label: 'Новый', class: 'badge-processing' }, // Сделаем желтым по дефолту
+    'new': { label: 'Новый', class: 'badge-processing' },
     'processing': { label: 'В обработке', class: 'badge-processing' },
     'shipped': { label: 'Отправлен', class: 'badge-shipped' },
     'delivered': { label: 'Доставлен', class: 'badge-delivered' },
-    'cancelled': { label: 'Отменен', class: 'badge-processing' } // Можно сделать красный бейдж потом
+    'cancelled': { label: 'Отменен', class: 'badge-processing' }
 };
 
 function getStatusInfo(status) {
@@ -178,24 +170,19 @@ function formatDate(dateStr) {
     return `${day}.${month}.${year} ${hours}:${minutes}`;
 }
 
-// Рендер вкладки "Заказы" с фетчем из БД
+// Загрузка и рендер списка заказов
 async function renderOrdersTab(container) {
     container.innerHTML = `<div style="padding: 40px; text-align: center; color: #666;">Загрузка заказов...</div>`;
 
     const token = localStorage.getItem('adminToken');
     try {
         const response = await fetch('http://localhost:5000/orders/admin/all', {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
 
-        if (!response.ok) {
-            throw new Error('Ошибка загрузки заказов');
-        }
+        if (!response.ok) throw new Error('Ошибка загрузки заказов');
 
         const data = await response.json();
-        // data может быть массивом заказов или объектом { items: [], total: ... }
         const orders = Array.isArray(data) ? data : (data.items || data.data || []);
 
         const ordersHTML = `
