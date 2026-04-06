@@ -1,0 +1,1 @@
+DELETE FROM [dbo].[_prisma_migrations] WHERE [migration_name] = '20260306113101_make_category_image_required';

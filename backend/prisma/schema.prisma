@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// --------------------------------------------------------
+// 1. ПОЛЬЗОВАТЕЛИ И РОЛИ
+// --------------------------------------------------------
+
+model Role {
+  id          Int     @id @default(autoincrement()) @map("role_id")
+  name        String  @unique
+  description String?
+  users       User[]
+
+  @@map("roles")
+}
+
+model Team {
+  id        Int    @id @default(autoincrement()) @map("team_id")
+  name      String @unique
+  foremanId Int    @unique @map("foreman_id")
+
+  foreman User    @relation("TeamForeman", fields: [foremanId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  workers User[]  @relation("TeamMembers")
+  orders  Order[] @relation("TeamOrders")
+
+  @@map("teams")
+}
+
+model User {
+  id                   Int       @id @default(autoincrement()) @map("user_id")
+  roleId               Int       @map("role_id")
+  email                String    @unique
+  username             String    @unique
+  passwordHash         String    @map("password_hash")
+  firstName            String    @map("first_name")
+  lastName             String    @map("last_name")
+  phone                String?
+  avatarUrl            String?   @map("avatar_url")
+  status               String    @default("active") // "active", "inactive"
+  
+  // Добавлены поля для отслеживания перерывов
+  breakStatus          String    @default("working") @map("break_status") // "working", "break_requested", "on_break"
+  breakApprovedById    Int?      @map("break_approved_by_id")
+
+  passwordResetToken   String?   @map("password_reset_token")
+  passwordResetExpiry  DateTime? @map("password_reset_expiry")
+  createdAt            DateTime? @default(now()) @map("created_at")
+  teamId               Int?      @map("team_id")
+
+  role             Role                 @relation(fields: [roleId], references: [id])
+  team             Team?                @relation("TeamMembers", fields: [teamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  managedTeam      Team?                @relation("TeamForeman")
+  
+  orders           Order[]
+  workerOrders     Order[]              @relation("OrderWorker")
+  inventoryLogs    InventoryLog[]
+  
+  breakApprovedBy  User?                @relation("BreakApprover", fields: [breakApprovedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  approvedBreaks   User[]               @relation("BreakApprover")
+
+  @@map("users")
+}
+
+// --------------------------------------------------------
+// 2. ТОВАРЫ И СКЛАД
+// --------------------------------------------------------
+
+model Category {
+  id         Int                 @id @default(autoincrement()) @map("category_id")
+  name       String              @unique
+  slug       String              @unique
+  imageUrl   String              @default("https://placehold.co/400") @map("image_url")
+  products   Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            Int      @id @default(autoincrement()) @map("product_id")
+  categoryId    Int      @map("category_id")
+  name          String
+  description   String?
+  price         Decimal  @default(0) @db.Decimal(10, 2) @map("base_price")
+  stockQuantity Int      @default(0) @map("stock_quantity")
+  imageUrl      String?  @map("image_url")
+  sku           String?  @unique
+  storageCell   String?  @map("storage_cell") // Ячейка на складе
+  department    String?  @map("department")   // Отдел (напр. "Холодный склад")
+  isActive      Boolean? @default(true) @map("is_active")
+
+  category        Category                @relation(fields: [categoryId], references: [id])
+  inventoryLogs   InventoryLog[]
+  orderItems      OrderItem[]
+  @@map("products")
+}
+
+
+
+// --------------------------------------------------------
+// 3. ОПЕРАЦИИ (ЗАКАЗЫ, СКЛАД)
+// --------------------------------------------------------
+
+model InventoryLog {
+  id           Int       @id @default(autoincrement()) @map("log_id")
+  productId    Int       @map("product_id")
+  userId       Int?      @map("user_id") // аудит: кто изменил остаток
+  changeAmount Int       @map("change_amount")
+  reason       String
+  createdAt    DateTime? @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id])
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("inventory_log")
+}
+
+model Order {
+  id               Int       @id @default(autoincrement()) @map("order_id")
+  userId           Int       @map("user_id") // "заказчик" или манагер, чтобы заказ не висел в воздухе
+  status           String?   @default("new") // 'new', 'processing', 'packed', 'ready', 'delivered'
+  totalAmount      Decimal   @default(0) @map("total_amount") @db.Decimal(12, 2)
+  createdAt        DateTime? @default(now()) @map("created_at")
+  assignedTeamId   Int?      @map("assigned_team_id")
+  assignedWorkerId Int?      @map("assigned_worker_id")
+  workerQueueStatus String?  @map("worker_queue_status") // 'active' или 'queued' или 'picked'
+
+  user           User        @relation(fields: [userId], references: [id])
+  assignedTeam   Team?       @relation("TeamOrders", fields: [assignedTeamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignedWorker User?       @relation("OrderWorker", fields: [assignedWorkerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items          OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id            Int     @id @default(autoincrement()) @map("item_id")
+  orderId       Int     @map("order_id")
+  productId     Int     @map("product_id")
+  quantity      Int
+  isPacked      Boolean @default(false)
+  hasError      Boolean @default(false) @map("has_error") // Для расчета Error Rate
+  packedAt      DateTime? @map("packed_at") // Для расчета Line Items per hour
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+

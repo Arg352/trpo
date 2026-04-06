@@ -1,0 +1,48 @@
+# Dependencies
+**/node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+/dist/
+/build/
+backend/dist/
+frontend/dist/
+out/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
+.env.*
+backend/.env
+
+# Prisma
+backend/prisma/generated/
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+/tmp/
+/temp/
+*.pid
+*.seed
+*.pid.lock
+push_out.txt
+seed_out.txt
